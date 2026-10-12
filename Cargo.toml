@@ -1,6 +1,6 @@
 [package]
 name = "ulala"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT"
 
@@ -8,7 +8,7 @@ license = "MIT"
 # Bump `rev` to ship a newer sim. For local development against a sibling checkout, put in .cargo/config.toml:
 #   [patch."https://github.com/kachi-dev/uma-race-simulator"]
 #   uma_race_sim = { path = "../uma-race-simulator" }
-uma_race_sim = { git = "https://github.com/kachi-dev/uma-race-simulator", rev = "c6d1161814795a3aa4f14a6c4065cb990f2e6b90" }
+uma_race_sim = { git = "https://github.com/kachi-dev/uma-race-simulator", rev = "4df369b34c2064cae54d26fb0f30f4f02ce5b9f4" }
 dioxus = { version = "0.7", features = ["desktop"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -21,6 +21,11 @@ rfd = { version = "0.17", default-features = false }
 opt-level = 1
 [profile.dev.package.uma_race_sim]
 opt-level = 3
+
+# Whole-program optimization: the sim runs ~10% faster. No panic = "abort": batch jobs report worker panics.
+[profile.release]
+lto = "fat"
+codegen-units = 1
 
 [target.'cfg(windows)'.dependencies]
 # Same version dioxus-desktop already pulls in; only for the frameless window chrome (src/chrome_win.rs).
