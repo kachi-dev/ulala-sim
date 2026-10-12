@@ -97,9 +97,9 @@ struct Gain {
     by_distance: Vec<(f32, f32)>,
 }
 
-/// `paired(item, seed)` (gain, activation distances, full spurts per horse) for `items` × `n` seeds on all cores → per
-/// item (index, `Gain`), best mean first, and each horse's full-spurt rate over every finished pair. Items without all
-/// `n` seeds (cancelled) are dropped: a ranking on a few samples would mislead.
+/// `paired(item, seed)` (gain, activation distances, full spurts per horse) for `items` × `n` seeds on
+/// `worker_threads()` → per item (index, `Gain`), best mean first, and each horse's full-spurt rate over every finished
+/// pair. Items without all `n` seeds (cancelled) are dropped: a ranking on a few samples would mislead.
 fn measure(items: usize, n: usize, w: &Work, paired: impl Fn(usize, usize) -> (f32, Vec<f32>, Vec<u8>) + Sync) -> (Vec<(usize, Gain)>, Vec<f32>) {
     let res = par_map(items * n, w, |i| paired(i / n, i % n));
     let horses = res.first().map_or(0, |r| r.1.2.len());

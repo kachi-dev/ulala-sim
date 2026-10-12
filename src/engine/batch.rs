@@ -46,11 +46,11 @@ pub struct Work {
     pub cancel: AtomicBool,
 }
 
-/// `f(0..n)` on all cores, `(i, f(i))` in index order; bumps `w.done` after each item and stops taking new ones once
+/// `f(0..n)` on `worker_threads()` threads, `(i, f(i))` in index order; bumps `w.done` after each item and stops taking new ones once
 /// `w.cancel` is set (then some indices are missing). A panic in `f` is re-raised.
 pub(super) fn par_map<T: Send>(n: usize, w: &Work, f: impl Fn(usize) -> T + Sync) -> Vec<(usize, T)> {
     let next = AtomicUsize::new(0);
-    let threads = std::thread::available_parallelism().map_or(1, |t| t.get()).min(n).max(1);
+    let threads = super::worker_threads().min(n).max(1);
     let mut out: Vec<(usize, T)> = std::thread::scope(|s| {
         let work = || {
             let mut v = Vec::new();
@@ -140,8 +140,8 @@ fn outcomes(runs: &[&HorseRun], id: i32) -> [f32; 4] {
     o
 }
 
-/// Runs `input` once per seed on all cores, counting finished runs in `w.done`. Once `w.cancel` is set it stops early
-/// and the result covers only the finished seeds (callers discard it).
+/// Runs `input` once per seed on `worker_threads()`, counting finished runs in `w.done`. Once `w.cancel` is set it
+/// stops early and the result covers only the finished seeds (callers discard it).
 pub fn run_batch(race: &Race, input: &RaceInput, seeds: &[i32], w: &Work) -> Batch {
     // Keep only the summaries: full frames for thousands of runs would be ~100 MB.
     let runs: Vec<_> = par_map(seeds.len(), w, |i| {

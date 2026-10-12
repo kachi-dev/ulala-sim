@@ -52,7 +52,7 @@ pub fn RankingTab() -> Element {
     let n = *s.r_n.read();
     let combos = picked.len() * styles.len();
     let work = combos * n * 2 * size;
-    let eta = estimate(work as f32 / s.g_rate.read().max(1.0));
+    let eta = eta(s, work);
     let n_picked = picked.len();
     let styles_on = styles.clone();
     let start = move |_| {

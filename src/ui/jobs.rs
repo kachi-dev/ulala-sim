@@ -56,6 +56,11 @@ pub(super) fn use_stale(s: S, rev: impl Fn() -> Option<u64> + 'static) -> Memo<b
     use_memo(move || rev().is_some_and(|r| r != *s.rev.read()))
 }
 
+/// "about 40 s" for `work` horse-races at the measured rate on the chosen share of the CPU.
+pub(super) fn eta(s: S, work: usize) -> String {
+    estimate(work as f32 / (*s.g_rate.read() * threads_at(*s.cpu.read()) as f32).max(1.0))
+}
+
 /// Skill gains / Uma ranking: claims the app, runs `f` as a cancellable job and hands its result to `done`. `work`
 /// (in horse-races) over the time taken refines `g_rate` for the next estimate.
 pub(super) fn measure<T: Send + 'static>(
@@ -76,7 +81,7 @@ pub(super) fn measure<T: Send + 'static>(
             Ok((v, cancelled)) => {
                 let secs = t0.elapsed().as_secs_f32();
                 if !cancelled && secs > 0.5 {
-                    s.g_rate.set(work as f32 / secs);
+                    s.g_rate.set(work as f32 / secs / worker_threads() as f32);
                 }
                 done(s, v);
             }

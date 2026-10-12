@@ -46,7 +46,7 @@ pub fn set_game_dir(dir: &Path) -> Result<Setup, String> {
     let mut p = paths();
     p.game = Some(dir.to_path_buf());
     p.output = horseact_output(dir);
-    save_settings(&Settings { game_dir: p.game.clone(), horseact_output: p.output.clone(), compact: p.compact });
+    save(&p);
     drop(p);
     Ok(setup())
 }
@@ -59,7 +59,30 @@ pub fn compact_pref() -> bool {
 pub fn set_compact_pref(on: bool) {
     let mut p = paths();
     p.compact = Some(on);
-    save_settings(&Settings { game_dir: p.game.clone(), horseact_output: p.output.clone(), compact: p.compact });
+    save(&p);
+}
+
+/// Share of logical processors long jobs run on, in percent; half until the user picks (the other half stays free for
+/// the game, the browser, ...).
+pub fn cpu_pref() -> u8 {
+    paths().cpu.unwrap_or(50)
+}
+
+pub fn set_cpu_pref(pct: u8) {
+    let mut p = paths();
+    p.cpu = Some(pct);
+    save(&p);
+}
+
+/// Worker threads for long jobs.
+pub fn worker_threads() -> usize {
+    threads_at(cpu_pref())
+}
+
+/// `pct` % of the logical processors (rounded up), at least 1.
+pub fn threads_at(pct: u8) -> usize {
+    let all = std::thread::available_parallelism().map_or(1, |t| t.get());
+    (all * pct as usize).div_ceil(100).max(1)
 }
 
 /// `%LOCALAPPDATA%/ulala`
@@ -75,10 +98,16 @@ struct Settings {
     horseact_output: Option<PathBuf>,
     #[serde(default)]
     compact: Option<bool>,
+    #[serde(default)]
+    cpu: Option<u8>,
 }
 
 fn settings_file() -> Option<PathBuf> {
     app_dir().map(|d| d.join("settings.json"))
+}
+
+fn save(p: &Paths) {
+    save_settings(&Settings { game_dir: p.game.clone(), horseact_output: p.output.clone(), compact: p.compact, cpu: p.cpu });
 }
 
 fn save_settings(s: &Settings) {
@@ -94,6 +123,7 @@ struct Paths {
     output: Option<PathBuf>,
     first: bool,
     compact: Option<bool>,
+    cpu: Option<u8>,
 }
 
 /// Stored in `%LOCALAPPDATA%/ulala/settings.json`; looked up again while missing or gone (e.g. horseACT installed
@@ -105,13 +135,13 @@ fn paths() -> MutexGuard<'static, Paths> {
         let first = saved.is_none();
         let saved = saved.unwrap_or_default();
         let game = saved.game_dir.clone().filter(|d| is_game(d)).or_else(find_game);
-        let compact = saved.compact;
+        let (compact, cpu) = (saved.compact, saved.cpu);
         if let Some(out) = saved.horseact_output.filter(|p| p.is_dir()) {
-            return Mutex::new(Paths { game, output: Some(out), first, compact });
+            return Mutex::new(Paths { game, output: Some(out), first, compact, cpu });
         }
         let output = game.as_deref().and_then(horseact_output);
-        save_settings(&Settings { game_dir: saved.game_dir, horseact_output: output.clone(), compact });
-        Mutex::new(Paths { game, output, first, compact })
+        save_settings(&Settings { game_dir: saved.game_dir, horseact_output: output.clone(), compact, cpu });
+        Mutex::new(Paths { game, output, first, compact, cpu })
     })
     .lock()
     .unwrap_or_else(|e| e.into_inner())

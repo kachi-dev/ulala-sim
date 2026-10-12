@@ -181,8 +181,10 @@ struct S {
     g_res: Signal<Option<GainsRes>>,
     g_sort: Signal<(usize, bool)>,
     g_sel: Signal<Option<i32>>,
-    /// Measured horse-races per second (for the time estimate).
+    /// Measured horse-races per second per worker thread (for the time estimate).
     g_rate: Signal<f32>,
+    /// Options: share of logical processors for long jobs, percent (`cpu_pref`).
+    cpu: Signal<u8>,
 }
 
 #[component]
@@ -248,7 +250,8 @@ pub fn App() -> Element {
         g_res: use_signal(|| None),
         g_sort: use_signal(|| (1, true)),
         g_sel: use_signal(|| None),
-        g_rate: use_signal(|| 4000.0),
+        g_rate: use_signal(|| 500.0),
+        cpu: use_signal(cpu_pref),
     };
     use_context_provider(|| s);
     // An effect, not a hook: starting a job writes signals, which the component body must not.

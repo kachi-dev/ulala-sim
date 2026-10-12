@@ -471,6 +471,16 @@ table.gains td { padding-top: 3px; padding-bottom: 3px; }
 .tb-btn svg .fill { fill: currentColor; stroke: none; }
 .tb-btn:hover { background: var(--hover); }
 .tb-btn.close:hover { background: var(--danger); color: #fff; }
+.tb-btn.on { background: var(--hover); }
+.tb-tools { display: flex; align-self: stretch; }
+.tb-tools .tb-btn { width: 34px; }
+.menu-catch { position: fixed; inset: 0; z-index: 60; }
+.menu {
+  position: fixed; z-index: 75; top: calc(var(--titlebar-h) + 6px); right: 8px; width: 270px; padding: 10px 14px 12px;
+  background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
+}
+.menu h4 { margin: 0 0 8px; }
+.menu p { margin: 8px 0 0; font-size: 12px; line-height: 1.4; }
 .resize-edge { position: fixed; z-index: 80; }
 .resize-edge.n, .resize-edge.s { left: 8px; right: 8px; height: 4px; cursor: ns-resize; }
 .resize-edge.e, .resize-edge.w { top: 8px; bottom: 8px; width: 4px; cursor: ew-resize; }

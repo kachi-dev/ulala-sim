@@ -1,5 +1,5 @@
 //! Custom window chrome and app header: the window is undecorated (main.rs, chrome_win.rs), so this 40px strip
-//! holds the logo, the race context (also the drag area), Races, theme, the window buttons, and the
+//! holds the logo, the race context (also the drag area), Races, theme, options, the window buttons, and the
 //! invisible resize edges.
 
 use super::*;
@@ -54,6 +54,7 @@ pub fn TitleBar() -> Element {
         }
     });
     let ready = s.race.read().is_some();
+    let mut options = use_signal(|| false);
     rsx! {
         header { class: "titlebar",
             img { class: "tb-logo", src: "/a/icon.png", alt: "Ulala", title: "Ulala: Urara never gives up!" }
@@ -77,15 +78,23 @@ pub fn TitleBar() -> Element {
             if ready {
                 button { class: "btn ghost tb-races", title: "Open a saved race (Ctrl+O)", onclick: move |_| open_saves(s), "Races" }
             }
-            button {
-                class: "tb-btn",
-                title: "Toggle light / dark theme",
-                onclick: |_| {
-                    document::eval(
-                        "const r = document.documentElement; r.dataset.theme = r.dataset.theme === 'light' ? 'dark' : 'light'; localStorage.setItem('theme', r.dataset.theme);",
-                    );
-                },
-                svg { class: "theme-ico", view_box: "0 0 24 24", circle { cx: "12", cy: "12", r: "8" } path { class: "fill", d: "M12 4a8 8 0 0 1 0 16z" } }
+            div { class: "tb-tools",
+                button {
+                    class: "tb-btn",
+                    title: "Toggle light / dark theme",
+                    onclick: |_| {
+                        document::eval(
+                            "const r = document.documentElement; r.dataset.theme = r.dataset.theme === 'light' ? 'dark' : 'light'; localStorage.setItem('theme', r.dataset.theme);",
+                        );
+                    },
+                    svg { class: "theme-ico", view_box: "0 0 24 24", circle { cx: "12", cy: "12", r: "8" } path { class: "fill", d: "M12 4a8 8 0 0 1 0 16z" } }
+                }
+                button { class: if options() { "tb-btn on" } else { "tb-btn" }, title: "Options", onclick: move |_| options.toggle(),
+                    svg { class: "theme-ico", view_box: "-3 -3 30 30", style: "stroke-width: 2.5",
+                        circle { cx: "12", cy: "12", r: "3" }
+                        path { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" }
+                    }
+                }
             }
             div { class: "titlebar-buttons",
                 button { class: "tb-btn", title: "Minimize", onclick: |_| window().set_minimized(true),
@@ -106,9 +115,39 @@ pub fn TitleBar() -> Element {
                 }
             }
         }
+        if options() {
+            div { class: "menu-catch", onclick: move |_| options.set(false) }
+            Options {}
+        }
         if !maximized() {
             div { class: "window-edge" }
             ResizeEdges {}
+        }
+    }
+}
+
+/// The options menu under the title bar's gear.
+#[component]
+fn Options() -> Element {
+    let mut s = use_context::<S>();
+    let cpu = *s.cpu.read();
+    let all = threads_at(100);
+    rsx! {
+        div { class: "menu",
+            h4 { "CPU for simulations" }
+            div { class: "seg small",
+                for pct in [25u8, 50, 75, 100] {
+                    button {
+                        class: if pct == cpu { "on" },
+                        onclick: move |_| {
+                            s.cpu.set(pct);
+                            set_cpu_pref(pct);
+                        },
+                        "{pct}%"
+                    }
+                }
+            }
+            p { class: "muted", "{threads_at(cpu)} of {all} threads" }
         }
     }
 }

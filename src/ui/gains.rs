@@ -84,7 +84,7 @@ pub fn GainsTab() -> Element {
     let n_c = cands.len();
     let races = n_c * n * 2;
     let work = races * size;
-    let eta = estimate(work as f32 / s.g_rate.read().max(1.0));
+    let eta = eta(s, work);
     let start = move |_| {
         let (Some(race), Some(cv)) = (s.race.cloned(), s.cview.cloned()) else { return };
         if cands.is_empty() {
