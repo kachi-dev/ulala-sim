@@ -32,7 +32,7 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
         .filter(|&i| f.is_none_or(|f| f == i))
         .map(|i| {
             let d = cur.activations.iter().filter(|a| a.horse == i).map(|a| a.distance).collect();
-            (names[i].clone(), res.colors[i].clone(), d)
+            (names[i].clone(), if f.is_some() { "var(--accent)".to_string() } else { res.colors[i].clone() }, d)
         })
         .collect();
     let acts: Vec<&Activation> = cur.activations.iter().filter(|a| f.is_none_or(|f| f == a.horse)).collect();

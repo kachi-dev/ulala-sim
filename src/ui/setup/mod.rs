@@ -146,6 +146,8 @@ fn regions(res: &Res, focus: Option<usize>) -> (Vec<Region>, bool) {
         _ if n <= 6 => (0..n).collect(),
         _ => return (vec![], true),
     };
+    // One uma: the accent; several: their own colours, to tell them apart.
+    let color = |h: usize| if who.len() == 1 { "var(--accent)".to_string() } else { res.colors[h].clone() };
     let mut out = vec![];
     match &res.kind {
         Kind::Single { cur, .. } => {
@@ -153,7 +155,7 @@ fn regions(res: &Res, focus: Option<usize>) -> (Vec<Region>, bool) {
             let len = res.cv.distance * 0.012;
             for a in cur.activations.iter().filter(|a| who.contains(&a.horse) && a.distance >= 1.0).take(MAX_REGIONS) {
                 let end = (a.distance + len).min(res.cv.distance);
-                out.push((a.distance, end, skill_info(a.skill_id).name, res.colors[a.horse].clone(), vec![]));
+                out.push((a.distance, end, skill_info(a.skill_id).name, color(a.horse), vec![]));
             }
         }
         Kind::Batch { cur, .. } => {
@@ -162,7 +164,7 @@ fn regions(res: &Res, focus: Option<usize>) -> (Vec<Region>, bool) {
                 for st in &cur.horses[h].skills {
                     if let Some((a, b, bins)) = span(&st.distances, res.cv.distance) {
                         let label = format!("{} {:.0}%", skill_info(st.skill_id).name, st.rate * 100.0);
-                        rated.push((st.rate, (a, b, label, res.colors[h].clone(), bins)));
+                        rated.push((st.rate, (a, b, label, color(h), bins)));
                     }
                 }
             }

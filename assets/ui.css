@@ -376,10 +376,9 @@ table.grid { border-collapse: collapse; width: 100%; }
 .acts { margin-top: 10px; }
 .acts summary { cursor: pointer; font-weight: 700; color: var(--accent-ink); }
 .mini { display: flex; align-items: flex-end; gap: 1px; height: 26px; width: 120px; border-bottom: 1px solid var(--line); }
-.mini > div { background: var(--c); flex: 1; min-height: 1px; border-radius: 2px 2px 0 0; opacity: .85; }
+.mini > div { background: var(--accent); flex: 1; min-height: 1px; border-radius: 2px 2px 0 0; opacity: .85; }
 .boxcell { min-width: 200px; }
 .boxline { display: grid; grid-template-columns: 64px 1fr 48px; align-items: center; gap: 8px; }
-.detail { border: 1.5px solid var(--accent-2-soft); }
 .kpis { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
 .kpis > div { background: var(--surface-2); border-radius: 12px; padding: 8px 14px; min-width: 110px; }
 .kpis b { display: block; font-size: 19px; }
@@ -641,6 +640,7 @@ table.matrix td.never { color: var(--muted); background: repeating-linear-gradie
 .modal.notice h3 { margin: 0; }
 .modal.notice p { margin: 0; }
 .modal.notice .btn { align-self: flex-end; }
+.modal.notice .btns { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* Skill outcomes: activated / wit check / can't here / conditions not met (OUTCOMES). */
 .obar { display: flex; height: 9px; min-width: 90px; border-radius: 5px; overflow: hidden; background: var(--surface-2); cursor: help; }

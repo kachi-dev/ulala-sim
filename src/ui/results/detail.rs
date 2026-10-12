@@ -29,15 +29,16 @@ pub(super) fn horse_detail(
     let (mut focus, mut skill_sel) = (s.focus, s.skill_sel);
     let h = &cur.horses[i];
     let b = base.map(|b| &b.horses[i]);
-    let color = res.colors[i].clone();
+    // Charts of one uma: the accent; her team / gate colour stays on her icon.
+    let color = "var(--accent)".to_string();
     let n = cur.horses.len();
     let cv = &res.cv;
 
     let mut series = vec![];
     if let Some(b) = b {
-        series.push(place_series(&names[i], &res.colors[i], b, "baseline", true));
+        series.push(place_series(&names[i], &color, b, "baseline", true));
     }
-    series.push(place_series(&names[i], &res.colors[i], h, if b.is_some() { "edited" } else { "mean, p25-p75, p10-p90" }, false));
+    series.push(place_series(&names[i], &color, h, if b.is_some() { "edited" } else { "mean, p25-p75, p10-p90" }, false));
     let bars: Vec<(String, f32)> = h.place_hist.iter().enumerate().map(|(k, v)| ((k + 1).to_string(), *v)).collect();
     let compare = b.map(|b| b.place_hist.clone());
 
@@ -78,7 +79,7 @@ pub(super) fn horse_detail(
                 div { b { "{pct(h.hp_out_rate)}" } span { "ran out of HP" } }
             }
             if let Some(d) = diff {
-                {vs_baseline(d, res.ed_mask.get(i) == Some(&true), &res.colors[i])}
+                {vs_baseline(d, res.ed_mask.get(i) == Some(&true), &color)}
             }
             if n > 1 {
                 div { class: "cols",

@@ -4,11 +4,11 @@
 
 A lil' vibe-coded app to integrate with my race simulator and provide an umalator-like experience.
 
-If all you need is skill length gain/efficiency on a track, https://alpha123.github.io/uma-tools/umalator-global/ is likely going to be a lot more useful to you than something like this. 
+That being said, if all you need is skill length gain/efficiency on a track, https://alpha123.github.io/uma-tools/umalator-global/ is likely going to be a lot more useful to you than something like this. 
 
 This tool gives you complete control over lobby simulation, and implements all simulation mechanics including lane movement, blocking, overtaking, etcetera. These are lobby-reliant interactions between umas, so skills that depend on these things, will give varying results depending on the lobby you simulate with.
 
-## What it looks like
+## Preview
 
 ### Results
 ![Results of 1000 races](docs/results.png)
@@ -18,10 +18,15 @@ This tool gives you complete control over lobby simulation, and implements all s
 
 ### Skill gains
 ![Skill gains](docs/skill-gains.png)
-Yes, this chart is correct. In this particular lobby, Vodka can *lose* lengths due to Firm Conditions as knock-on positioning effects for her, and thus all other umas in the race, means that certain skills no longer activate (nimble nav, updrafters, etc) in some of the simulations.
+-L is due to knock-on effects of skills activating v not activating. On this track, this is usually due to that skill knocking Urara out of position for On Your Left! On one hand, it makes it more difficult to see raw length gains just from a singular skill, but on the other hand it does accurately portray the effect of this skill within that particular race/within this particular lobby setup.
+
+A sample count higher than 200 races, along with some sort of option to vary the lobby per-race, would likely(?) increase the accuracy of these results - but it is interesting data nonetheless.
 
 ### Uma ranking
 ![Uma ranking](docs/uma-ranking.png)
+
+### Stamina
+![Stamina](docs/stamina.png)
 
 # Race simulator
 (copied from https://github.com/kachi-dev/uma-race-simulator)

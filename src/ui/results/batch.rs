@@ -5,10 +5,10 @@ use super::detail::horse_detail;
 use crate::charts::*;
 
 /// Inline mini histogram of finishing places.
-fn mini_hist(h: &[f32], color: &str) -> Element {
+fn mini_hist(h: &[f32]) -> Element {
     let max = h.iter().cloned().fold(0.0001, f32::max);
     rsx! {
-        div { class: "mini", style: "--c: {color}",
+        div { class: "mini",
             for (k, v) in h.iter().enumerate() {
                 div { title: "{k + 1}: {pct(*v)}", style: "height: {v / max * 100.0}%" }
             }
@@ -74,7 +74,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                                                 }
                                             }
                                         }
-                                        td { class: "c-hist", {mini_hist(&h.place_hist, &res.colors[i])} }
+                                        td { class: "c-hist", {mini_hist(&h.place_hist)} }
                                         td { class: "boxcell",
                                             BoxRow {
                                                 p10: h.finish_time.p10,
@@ -84,7 +84,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                                                 p90: h.finish_time.p90,
                                                 lo,
                                                 hi,
-                                                color: res.colors[i].clone(),
+                                                color: "var(--accent)".to_string(),
                                             }
                                             span { class: "small muted", "{ft(h.finish_time.p50)}" }
                                             if h.finish_time.p50 > hi { span { class: "small off", title: "Far behind the field; the box is clipped at the right edge", " off scale" } }

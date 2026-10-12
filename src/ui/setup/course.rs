@@ -8,10 +8,41 @@ fn course_label(c: &CourseInfo) -> String {
     format!("{}m{}", c.distance, INOUT.get(c.inout as usize).unwrap_or(&""))
 }
 
-fn change_course(s: S, race: &Race, id: i32) {
+/// A course change: course `id`, plus the conditions of CM preset `preset` when it came from the preset menu.
+type CourseChange = (i32, Option<usize>);
+
+fn apply_course(s: S, race: &Race, (id, preset): CourseChange) {
+    if let Some(p) = preset.and_then(|i| cm_presets().get(i)) {
+        edit_race(s, |inp| {
+            // Kept by set_course when the sim knows the CM race instance.
+            inp.race_instance_id = p.race_instance_id;
+            inp.race_type = 5; // Champions
+            (inp.ground_condition, inp.weather, inp.season, inp.time) = (p.ground, p.weather, p.season, p.time);
+        });
+    }
     let mut cv = s.cview;
     edit_race(s, |inp| set_course(race, inp, id));
     cv.set(Some(Arc::new(course_view(race, id))));
+}
+
+/// A saved race on another course isn't that save any more: asks first (`ask`), else applies.
+fn change_course(s: S, mut ask: Signal<Option<CourseChange>>, c: CourseChange) {
+    let Some(race) = s.race.cloned() else { return };
+    if race.path.is_some() && c.0 != s.input.peek().course_set_id {
+        ask.set(Some(c));
+    } else {
+        apply_course(s, &race, c);
+    }
+}
+
+/// The save becomes a custom race on its setup: no save to reset to or check against the server.
+fn to_custom(mut s: S) -> Option<Arc<Race>> {
+    let r = s.race.cloned()?;
+    let custom = Arc::new(Race { path: None, replay: None, date: String::new(), player: None, ..(*r).clone() });
+    s.race.set(Some(custom.clone()));
+    s.baseline.set(None);
+    s.verify.set(None);
+    Some(custom)
 }
 
 /// Closest course to `distance` among `pool`.
@@ -38,7 +69,8 @@ fn seg(s: S, what: &str, cur: i32, opts: &[(i32, &'static str, &'static str)], s
 #[component]
 pub(super) fn CourseCard() -> Element {
     let s = use_context::<S>();
-    let (Some(race), Some(cv)) = (s.race.cloned(), s.cview.cloned()) else { return rsx! {} };
+    let mut ask = use_signal(|| None::<CourseChange>);
+    let (Some(_), Some(cv)) = (s.race.cloned(), s.cview.cloned()) else { return rsx! {} };
     let courses = s.courses.cloned();
     let input = s.input.read();
     let cur = courses.iter().find(|c| c.id == input.course_set_id).cloned().unwrap_or_else(|| cv.info.clone());
@@ -47,27 +79,55 @@ pub(super) fn CourseCard() -> Element {
     let surfaces: Vec<i32> = [1, 2].into_iter().filter(|&g| courses.iter().any(|c| c.track == cur.track && c.surface == g)).collect();
     let opts: Vec<CourseInfo> = courses.iter().filter(|c| c.track == cur.track && c.surface == cur.surface).cloned().collect();
     let (ground, weather, season, time, seed) = (input.ground_condition, input.weather, input.season, input.time, input.random_seed);
-    let (r1, r2, r3, r4) = (race.clone(), race.clone(), race.clone(), race.clone());
     let (c1, c2) = (courses.clone(), courses.clone());
     let cur_track = cur.track.clone();
     let known = |p: &CmPreset| courses.iter().any(|c| c.id == p.course_set_id);
     let on_preset = cm_preset_of(&input);
+    let (sel_track, sel_dist, sel_cm) = (cur.track.clone(), cur.id, on_preset.map_or(String::new(), |i| i.to_string()));
     rsx! {
+        // Wrapped: `.left > *` would size the scrim to the pane's max width.
+        if ask().is_some() {
+            div {
+                div { class: "scrim top" }
+                div { class: "modal notice",
+                    h3 { "Turn this into a custom race?" }
+                    p { "A different track, surface or distance no longer matches the saved race, so it becomes a custom race on the new field." }
+                    div { class: "btns",
+                        button {
+                            class: "btn ghost",
+                            onclick: move |_| {
+                                ask.set(None);
+                                // The selects already show the refused pick.
+                                resync("course-cm", &sel_cm);
+                                resync("course-track", &sel_track);
+                                resync("course-dist", sel_dist);
+                            },
+                            "Cancel"
+                        }
+                        button {
+                            class: "btn",
+                            onclick: move |_| {
+                                let Some(c) = ask.take() else { return };
+                                if let Some(race) = to_custom(s) {
+                                    apply_course(s, &race, c);
+                                }
+                            },
+                            "Make it custom"
+                        }
+                    }
+                }
+            }
+        }
         details { class: "card fold", open: true,
             summary { class: "card-h",
                 h3 { "Course and conditions" }
                 div { class: "grow" }
                 select {
+                    id: "course-cm",
                     title: "Load a Champions Meeting's course and conditions",
                     onchange: move |e| {
-                        let Some(p) = e.value().parse().ok().and_then(|i: usize| cm_presets().get(i)) else { return };
-                        edit_race(s, |inp| {
-                            // Kept by set_course when the sim knows the CM race instance.
-                            inp.race_instance_id = p.race_instance_id;
-                            inp.race_type = 5; // Champions
-                            (inp.ground_condition, inp.weather, inp.season, inp.time) = (p.ground, p.weather, p.season, p.time);
-                        });
-                        change_course(s, &r4, p.course_set_id);
+                        let Some((i, p)) = e.value().parse().ok().and_then(|i: usize| Some((i, cm_presets().get(i)?))) else { return };
+                        change_course(s, ask, (p.course_set_id, Some(i)));
                     },
                     option { value: "", selected: on_preset.is_none(), "CM preset" }
                     for (i, p) in cm_presets().iter().enumerate().filter(|(_, p)| known(p)) {
@@ -79,12 +139,13 @@ pub(super) fn CourseCard() -> Element {
                 label { class: "field",
                     span { "Track" }
                     select {
+                        id: "course-track",
                         onchange: move |e| {
                             let t = e.value();
                             let pool = c1.iter().filter(|c| c.track == t);
                             let same = pool.clone().filter(|c| c.surface == cur.surface);
                             if let Some(id) = nearest(same, cur.distance).or_else(|| nearest(pool, cur.distance)) {
-                                change_course(s, &r1, id);
+                                change_course(s, ask, (id, None));
                             }
                         },
                         for t in tracks {
@@ -99,10 +160,10 @@ pub(super) fn CourseCard() -> Element {
                             button {
                                 class: if g == cur.surface { "on" },
                                 onclick: {
-                                    let (c2, r2, track) = (c2.clone(), r2.clone(), cur_track.clone());
+                                    let (c2, track) = (c2.clone(), cur_track.clone());
                                     move |_| {
                                         if let Some(id) = nearest(c2.iter().filter(|c| c.track == track && c.surface == g), cur.distance) {
-                                            change_course(s, &r2, id);
+                                            change_course(s, ask, (id, None));
                                         }
                                     }
                                 },
@@ -114,9 +175,10 @@ pub(super) fn CourseCard() -> Element {
                 label { class: "field",
                     span { "Distance" }
                     select {
+                        id: "course-dist",
                         onchange: move |e| {
                             if let Ok(id) = e.value().parse() {
-                                change_course(s, &r3, id);
+                                change_course(s, ask, (id, None));
                             }
                         },
                         for c in opts {
