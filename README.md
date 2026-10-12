@@ -36,4 +36,10 @@ This project took a few days of work between myself and my top engineer (mr Opus
 
 Admittedly, this is probably just one of many upcoming race simulators, as AI has made reverse engineering trivial even for those with no decompilation/dissassembly experience. I imagine VMProtect/Themida stonks are rising at the moment, but I wouldn't be surprised if AI was even able to dump and reverse engineer virtualized code too...
 
+# Art credits
+
+- Chibi Urara (`chibi.webp`, app icon): [mochimochi kinako.](https://www.pixiv.net/artworks/88779143)
+- Great! Urara (`great.webp`): [goom (goomyparty)](https://www.pixiv.net/artworks/134781489)
+- Cheering Urara (`cheer.webp`) and game icons: official Umamusume art, © Cygames
+
 <p align="center"><img src="assets/img/great.webp" width="120" alt="Great!"></p>
