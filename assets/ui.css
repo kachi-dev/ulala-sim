@@ -326,10 +326,14 @@ table.grid { border-collapse: collapse; width: 100%; }
 .grid td { padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
 .grid tbody tr { cursor: pointer; }
 .grid tbody tr:hover { background: var(--hover); }
-.grid tr.edited { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
-.grid tr.sel { background: var(--accent-2-soft); box-shadow: inset 3px 0 0 var(--accent-2); }
+/* Row stripes go on the first cell: Chromium paints a row's own box-shadow even inside a hidden pane. */
+.grid tr.edited { background: var(--accent-soft); }
+.grid tr.edited > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.grid tr.sel { background: var(--accent-2-soft); }
+.grid tr.sel > td:first-child { box-shadow: inset 3px 0 0 var(--accent-2); }
 /* A table row's details (Skill gains), opened under it. */
-.grid tr.expand, .grid tr.expand:hover { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent-2); cursor: default; }
+.grid tr.expand, .grid tr.expand:hover { background: var(--surface-2); cursor: default; }
+.grid tr.expand > td { box-shadow: inset 3px 0 0 var(--accent-2); }
 .grid tr.expand > td { padding: 10px 14px 16px; white-space: normal; }
 .gdetail .kpis > div { background: var(--surface); }
 .grid .num { text-align: right; white-space: nowrap; }
