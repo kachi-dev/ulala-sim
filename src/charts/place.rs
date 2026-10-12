@@ -19,18 +19,38 @@ pub struct PlaceSeries {
 /// Placement (y, 1 at the top .. `field_size` at the bottom) vs % of course (x). Vertical markers at
 /// `markers` (x in %, label), e.g. the final-leg start. Hover shows the value under the cursor.
 /// A legend is drawn under the chart for 2–4 series (more = single-run mode; the UI's name chips cover it).
+/// `value_max`: a plain value axis instead (0 at the bottom, e.g. HP), with dashed reference lines at `hlines`.
 #[component]
-pub fn PlaceChart(series: Vec<PlaceSeries>, field_size: usize, markers: Vec<(f32, String)>) -> Element {
+pub fn PlaceChart(
+    series: Vec<PlaceSeries>,
+    field_size: usize,
+    markers: Vec<(f32, String)>,
+    #[props(default)] value_max: Option<f32>,
+    #[props(default)] hlines: Vec<(f32, String)>,
+) -> Element {
     let (mut size, cw) = use_width();
     const H: f32 = 320.0;
-    const L: f32 = 30.0;
+    // Room for 4-digit values.
+    let L: f32 = if value_max.is_some() { 40.0 } else { 30.0 };
     const R: f32 = 16.0;
     const T: f32 = 22.0;
     const B: f32 = 26.0;
     let (pw, ph) = (cw - L - R, H - T - B);
     let n = field_size.max(2) as f32;
     let x = move |pct: f32| L + pct.clamp(0.0, 100.0) / 100.0 * pw;
-    let y = move |p: f32| T + (p.clamp(1.0, n) - 1.0) / (n - 1.0) * ph;
+    let (lo, hi, ticks) = match value_max {
+        Some(m) => {
+            let (_, hi, _, ticks) = nice_domain(0.0, m, 4);
+            (0.0, hi, Some(ticks))
+        }
+        None => (1.0, n, None),
+    };
+    // Placement runs down from 1, values up from 0.
+    let y = move |v: f32| {
+        let f = (v.clamp(lo, hi) - lo) / (hi - lo);
+        T + if value_max.is_some() { 1.0 - f } else { f } * ph
+    };
+    let fmt = move |v: f32| if value_max.is_some() { format!("{v:.0}") } else { fmt_place(v) };
     // Index of `pct` in a series of `len` points (normally 101 → identity).
     let at = |v: &[f32], pct: usize| v.get(pct * (v.len().max(1) - 1) / 100).copied().unwrap_or(n);
     let pts = |v: &[f32]| {
@@ -56,15 +76,18 @@ pub fn PlaceChart(series: Vec<PlaceSeries>, field_size: usize, markers: Vec<(f32
         dim(s),
     )).collect();
 
-    let row_labels: Vec<f32> = (1..=n as usize).filter(|p| n <= 12.0 || (p - 1) % 2 == 0).map(|p| p as f32).collect();
+    let row_labels: Vec<f32> = ticks.unwrap_or_else(|| (1..=n as usize).filter(|p| n <= 12.0 || (p - 1) % 2 == 0).map(|p| p as f32).collect());
 
     // Tooltip rows at the hovered x, best placement first: (value, label, color, dashed, p25–p75).
     let tip = hover().map(|h| {
         let mut rows: Vec<_> = series.iter().map(|s| (
             at(&s.line, h), s.label.clone(), s.color.clone(), s.dashed,
-            s.inner.as_ref().map(|(lo, hi)| format!("{} to {}", fmt_place(at(lo, h)), fmt_place(at(hi, h)))),
+            s.inner.as_ref().map(|(lo, hi)| format!("{} to {}", fmt(at(lo, h)), fmt(at(hi, h)))),
         )).collect();
         rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+        if value_max.is_some() {
+            rows.reverse();
+        }
         let longest = rows.iter().map(|r| r.1.chars().count().min(24)).max().unwrap_or(0) as f32;
         let has_band = rows.iter().any(|r| r.4.is_some());
         let tw = 62.0 + longest * 6.2 + if has_band { 52.0 } else { 0.0 };
@@ -85,11 +108,15 @@ pub fn PlaceChart(series: Vec<PlaceSeries>, field_size: usize, markers: Vec<(f32
                     }
                 }
                 for (m, label) in markers.iter() {
-                    line { x1: x(*m), x2: x(*m), y1: T - 4.0, y2: T + ph, stroke: "var(--muted)", stroke_width: 1, stroke_opacity: 0.7 }
+                    line { x1: x(*m), x2: x(*m), y1: T - 4.0, y2: T + ph, stroke: "var(--muted)", stroke_width: 1, stroke_opacity: 0.7, stroke_dasharray: "4 4" }
                     text {
                         x: if *m > 80.0 { x(*m) - 4.0 } else { x(*m) + 4.0 }, y: T - 8.0, fill: "var(--muted)", font_size: 11,
                         text_anchor: if *m > 80.0 { "end" } else { "start" }, "{label}"
                     }
+                }
+                for (v, label) in hlines.iter() {
+                    line { x1: L, x2: cw - R, y1: y(*v), y2: y(*v), stroke: "var(--muted)", stroke_width: 1, stroke_opacity: 0.7, stroke_dasharray: "4 4" }
+                    text { x: L + 4.0, y: y(*v) - 4.0, fill: "var(--muted)", font_size: 11, "{label}" }
                 }
                 for (c, inner, outer, _, _, _, o) in drawn.iter() {
                     if let Some(b) = outer { polygon { points: "{b}", fill: "{c}", fill_opacity: 0.10 * o } }
@@ -117,7 +144,7 @@ pub fn PlaceChart(series: Vec<PlaceSeries>, field_size: usize, markers: Vec<(f32
                                 x1: tx + 8.0, x2: tx + 20.0, y1: T + 29.0 + k as f32 * 14.0, y2: T + 29.0 + k as f32 * 14.0,
                                 stroke: "{c}", stroke_width: 2.5, stroke_dasharray: if *dashed { "3 2" } else { "none" }
                             }
-                            text { x: tx + 26.0, y: T + 33.0 + k as f32 * 14.0, fill: "var(--ink)", font_size: 11, font_weight: 600, "{fmt_place(*v)}" }
+                            text { x: tx + 26.0, y: T + 33.0 + k as f32 * 14.0, fill: "var(--ink)", font_size: 11, font_weight: 600, "{fmt(*v)}" }
                             text { x: tx + 56.0, y: T + 33.0 + k as f32 * 14.0, fill: "var(--ink)", font_size: 11, "{truncate(label, 24)}" }
                             if let Some(r) = range {
                                 text { x: tx + tw - 8.0, y: T + 33.0 + k as f32 * 14.0, fill: "var(--muted)", font_size: 11, text_anchor: "end", "{r}" }

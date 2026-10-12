@@ -30,6 +30,12 @@ pub struct HorseRun {
     pub hp_out: bool,
     /// 0..=100 → placement (1-based) when this horse reached that % of the course.
     pub place_by_progress: Vec<u8>,
+    /// 0..=100 → HP when this horse reached that % of the course.
+    pub hp_by_progress: Vec<f32>,
+    /// HP needed at the final-leg start for a full spurt (max spurt speed to the goal).
+    pub spurt_need_hp: f32,
+    /// HP when this horse reached the final-leg start.
+    pub hp_at_final_leg: f32,
     /// Speed (m/s) when crossing the goal, interpolated from frames.
     pub goal_speed: f32,
     /// Lengths (2.5 m) behind the winner when the winner crossed the goal (exact from frames; 0 for the winner).
@@ -73,9 +79,9 @@ pub fn run_once(race: &Race, input: &RaceInput) -> Run {
     let goal = r.info.phase_distances.course_distance;
     let final_leg = r.info.phase_distances.phase_end_start_distance;
     // HP stops changing once a horse finishes, so the final HP is the HP at the goal.
-    let internals: Vec<(bool, f32, f32, f32, u8)> = (0..r.horses.len())
+    let internals: Vec<(bool, f32, f32, f32, u8, f32)> = (0..r.horses.len())
         .map(|i| {
-            let max_v = max_spurt_speed(&mut r, i);
+            let (max_v, need_hp) = max_spurt_speed(&mut r, i);
             let h = &r.horses[i];
             let ai = &h.ai;
             let kind = if ai.last_spurt_start_distance < 0.0 || ai.last_spurt_calc_result & last_spurt_calc_result::TRUE_FLAGS == 0 {
@@ -87,7 +93,7 @@ pub fn run_once(race: &Race, input: &RaceInput) -> Run {
                 let reduced = ai.last_spurt_calc_result != last_spurt_calc_result::TRUE_EXCEED_NEED_MAX_HP && ai.last_spurt_target_speed < max_v * (1.0 - 1e-5);
                 delayed as u8 + 2 * reduced as u8
             };
-            (h.is_hp_empty_on_race, h.hp.max(0.0), ai.last_spurt_target_speed, max_v, kind)
+            (h.is_hp_empty_on_race, h.hp.max(0.0), ai.last_spurt_target_speed, max_v, kind, need_hp)
         })
         .collect();
     let mut checks: Vec<Vec<SkillCheck>> = (0..r.horses.len()).map(|i| skill_checks(&r, i)).collect();
@@ -127,7 +133,7 @@ pub fn run_once(race: &Race, input: &RaceInput) -> Run {
     let horses = (0..n)
         .map(|h| {
             let res = &out.results[h];
-            let (hp_out, hp_at_goal, spurt_speed, max_spurt_speed, spurt_kind) = internals[h];
+            let (hp_out, hp_at_goal, spurt_speed, max_spurt_speed, spurt_kind, spurt_need_hp) = internals[h];
             HorseRun {
                 place: res.finish_order as usize + 1,
                 finish_time: res.finish_time_raw,
@@ -138,6 +144,10 @@ pub fn run_once(race: &Race, input: &RaceInput) -> Run {
                 hp_at_goal,
                 hp_out,
                 place_by_progress: (0..=100).map(|p| 1 + (0..n).filter(|&j| j != h && ahead(j, h, p)).count() as u8).collect(),
+                // At the goal: the exact final HP (the frame after it is past the finish, where HP stops dropping).
+                hp_by_progress: (0..=100).map(|p| if p == 100 { hp_at_goal } else { frame_at(frames, h, t[h][p], |f| f.hp).max(0.0) }).collect(),
+                spurt_need_hp,
+                hp_at_final_leg: frame_at(frames, h, cross_time(frames, h, final_leg), |f| f.hp).max(0.0),
                 goal_speed: frame_at(frames, h, t[h][100], |f| f.speed),
                 behind_lengths: if h == winner { 0.0 } else { ((goal - distance_at(frames, h, t[winner][100])) / 2.5).max(0.0) },
                 spurt_speed,
@@ -173,12 +183,13 @@ fn hp_out_distance(frames: &[Frame], h: usize) -> Option<f32> {
 }
 
 /// The last-spurt calc's max speed for horse `i`: the last-spurt calculation on its phase-End params with unlimited HP
-/// (the TrueExceedNeedMaxHp path: max speed, no RNG draw), as compare.rs's need_hp_per_m does.
+/// (the TrueExceedNeedMaxHp path: max speed, no RNG draw), as compare.rs's need_hp_per_m does. Also the HP that path
+/// needs at the final-leg start (the calc's own test: max speed over the remaining distance less the goal buffer).
 // ponytail: run on the finished race, so stats are the race-end ones (a temporary stat buff active at the final-leg
 // calc is missed); exposing the calc's max_v from the sim would make it exact.
-pub(super) fn max_spurt_speed(r: &mut sim_race::Race, i: usize) -> f32 {
+pub(super) fn max_spurt_speed(r: &mut sim_race::Race, i: usize) -> (f32, f32) {
     use uma_race_sim::sim::defs::Phase;
-    use uma_race_sim::sim::physics::{last_spurt, speed, stats};
+    use uma_race_sim::sim::physics::{hp, last_spurt, speed, stats};
     let h = &r.horses[i];
     let p = last_spurt::LastSpurtCalcParam {
         cur_distance: r.info.phase_distances.phase_end_start_distance,
@@ -196,7 +207,9 @@ pub(super) fn max_spurt_speed(r: &mut sim_race::Race, i: usize) -> f32 {
     let mut calc = last_spurt::new_last_spurt(r, r.info.base_speed);
     calc.calc_param = p;
     last_spurt::calc_last_spurt(r, &mut calc);
-    calc.last_spurt_target_speed
+    let v = calc.last_spurt_target_speed;
+    let remain = (p.course_distance as f32 - p.cur_distance - calc.last_spurt_distance_goal_buffer as f32).max(0.0);
+    (v, hp::calc_need_hp(r, p.race_base_speed, p.ground_modifier_multi_hp_sub, Phase::End, p.guts, v, remain))
 }
 
 /// The game's margin label for a gap in lengths: Nose, Head, Neck, 1/2L, 3/4L, 1L, 1 1/4L, 1 1/2L, 1 3/4L, 2L,
@@ -229,7 +242,7 @@ pub(super) fn custom_popularity(input: &RaceInput) -> RaceInput {
 }
 
 /// Horse `h`'s distance at time `t`, linear between frames.
-fn distance_at(frames: &[Frame], h: usize, t: f32) -> f32 {
+pub(super) fn distance_at(frames: &[Frame], h: usize, t: f32) -> f32 {
     frame_at(frames, h, t, |f| f.distance)
 }
 

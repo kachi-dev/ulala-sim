@@ -329,14 +329,8 @@ pub(super) fn mode_seg(s: S, mut sel: Signal<Option<bool>>, field: usize) -> (El
                 button { class: if npc { "on" }, onclick: move |_| sel.set(Some(true)), "NPCs" }
                 button { class: if !npc { "on" }, disabled: field <= 1, onclick: move |_| sel.set(Some(false)), "This field" }
             }
-            small { class: "muted mode-note",
-                if npc {
-                    "With 8 NPCs, from gate 5: a real field for position conditions, without your field's noise."
-                } else if field < FIELD_MIN {
-                    "With the whole field, topped up to {FIELD_MIN} with NPCs: includes positioning and blocking knock-on effects; noisier."
-                } else {
-                    "With the whole field: includes positioning and blocking knock-on effects; noisier."
-                }
+            if !npc {
+                small { class: "muted mode-note", "Empty slots will be filled in with NPCs" }
             }
         }
         if size > field.max(1) || npc {

@@ -80,6 +80,8 @@ fn custom_race() {
     for s in seeds(1, 4) {
         let run = run_once(&race, &RaceInput { random_seed: s, ..f.clone() });
         assert!(f.horses.iter().zip(&run.horses).all(|(h, r)| h.viewer_id != 0 || r.full_spurt), "seed {s}");
+        // HP along the course ends at the goal HP; a full spurt needs some HP, less than the start's.
+        assert!(run.horses.iter().all(|r| (r.hp_by_progress[100] - r.hp_at_goal).abs() < 1.0 && r.spurt_need_hp > 0.0 && r.spurt_need_hp < r.hp_by_progress[0]));
     }
 }
 
@@ -192,4 +194,28 @@ fn change_uma() {
 fn blob_sha_matches_git() {
     // `printf 'hello\n' | git hash-object --stdin`
     assert_eq!(blob_sha(b"hello\n"), "ce013625030ba8dba906f756967f9e9ca394464a");
+}
+
+#[test]
+fn stamina_debuffs() {
+    let race = new_race();
+    let mut input = race.input.clone();
+    // Urara (Late Surger) and an uma with Subdued Late Surgers (drains a Late Surger's HP early in the race).
+    let mut owner = new_horse(&race, cards()[0].card_id);
+    owner.skills.push(SkillInput { skill_id: 200891, level: 1 });
+    input.horses = vec![new_horse(&race, 105201), owner];
+    assert!(drains_hp(&race, 200891) && !drains_hp(&race, 200331));
+    let st = stamina(&race, &input, 0, &seeds(1, 8), true, &Work::default());
+    assert_eq!((st.loss.len(), st.stats.times.len(), st.debuffs.len()), (8, 8, 1));
+    let d = &st.debuffs[0];
+    assert_eq!((d.owner, d.skill_id), (1, 200891));
+    // Hits only when it activates; when it hits it takes HP, once per hit.
+    assert!(d.hit_rate > 0.0 && d.hit_rate <= d.rate && d.hp_lost > 0.0 && d.hit_at.len() == (d.hit_rate * 8.0).round() as usize);
+    assert!(st.all_muted.is_some() && (0.0..=1.0).contains(&st.full_at_max));
+    // Low stamina on the longest course: it costs lengths, and max stamina spurts more often.
+    set_course(&race, &mut input, cs_long(&race));
+    input.horses[0].stamina = 400;
+    let st = stamina(&race, &input, 0, &seeds(1, 8), true, &Work::default());
+    // Per seed it's noisy (the runs diverge, and with them later RNG draws); on average it costs.
+    assert!(st.loss.iter().map(|x| x.0).sum::<f32>() < -0.5 && st.full_at_max > st.stats.full_spurt_rate);
 }

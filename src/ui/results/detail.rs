@@ -262,7 +262,7 @@ fn vs_baseline(d: &BatchDiff, edited: bool, color: &str) -> Element {
     }
 }
 
-const SPURT_KINDS: [(&str, &str); 5] = [
+pub(in crate::ui) const SPURT_KINDS: [(&str, &str); 5] = [
     ("Full spurt", "Max spurt speed from the final-leg start"),
     ("Delayed", "Max speed, but started after the final-leg start"),
     ("Reduced", "Started on time, but at less than max speed (not a full spurt)"),
@@ -271,7 +271,7 @@ const SPURT_KINDS: [(&str, &str); 5] = [
 ];
 
 /// Batch uma detail: when the last spurt starts vs the expected point, how good it was, and HP left at the goal.
-fn spurt_and_hp(h: &HorseStats, cv: &CourseView, color: &str) -> Element {
+pub(in crate::ui) fn spurt_and_hp(h: &HorseStats, cv: &CourseView, color: &str) -> Element {
     let fl = cv.final_leg_start;
     let on_time = h.spurt_kinds[0] + h.spurt_kinds[2];
     let mut late: Vec<f32> = h.spurt_delays.iter().copied().filter(|&d| d > SPURT_ON_TIME_M).collect();

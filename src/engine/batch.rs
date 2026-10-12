@@ -19,7 +19,7 @@ pub fn seeds(s: i32, n: usize) -> Vec<i32> {
 }
 
 /// Mean, nearest-rank percentiles, min, max. Empty → all 0.
-pub(super) fn dist(mut v: Vec<f32>) -> Dist {
+pub fn dist(mut v: Vec<f32>) -> Dist {
     if v.is_empty() {
         return Dist::default();
     }
@@ -104,6 +104,10 @@ pub struct HorseStats {
     pub finish_time: Dist,
     /// 101 entries (0..=100 % of course): placement distribution at that point.
     pub place_by_progress: Vec<Dist>,
+    /// 101 entries: HP distribution at that % of the course.
+    pub hp_by_progress: Vec<Dist>,
+    /// Mean of `HorseRun::spurt_need_hp`.
+    pub spurt_need_hp: f32,
     pub full_spurt_rate: f32,
     pub hp_out_rate: f32,
     /// Over runs that spurted.
@@ -151,6 +155,11 @@ pub fn run_batch(race: &Race, input: &RaceInput, seeds: &[i32], w: &Work) -> Bat
     .into_iter()
     .map(|x| x.1)
     .collect();
+    summarize(input, seeds, &runs)
+}
+
+/// `run_batch`'s per-horse aggregate of finished runs (horse summaries and activations of each).
+pub(super) fn summarize(input: &RaceInput, seeds: &[i32], runs: &[(Vec<HorseRun>, Vec<Activation>)]) -> Batch {
     let k = runs.len().max(1) as f32;
     let n = input.horses.len();
     let horses = (0..n)
@@ -171,6 +180,8 @@ pub fn run_batch(race: &Race, input: &RaceInput, seeds: &[i32], w: &Work) -> Bat
                 place: dist(hr.iter().map(|x| x.place as f32).collect()),
                 finish_time: dist(hr.iter().map(|x| x.finish_time).collect()),
                 place_by_progress: (0..=100).map(|p| dist(hr.iter().map(|x| x.place_by_progress[p] as f32).collect())).collect(),
+                hp_by_progress: (0..=100).map(|p| dist(hr.iter().map(|x| x.hp_by_progress[p]).collect())).collect(),
+                spurt_need_hp: hr.iter().map(|x| x.spurt_need_hp).sum::<f32>() / k,
                 full_spurt_rate: rate(&|x| x.full_spurt),
                 hp_out_rate: rate(&|x| x.hp_out),
                 spurt_start: dist(hr.iter().map(|x| x.spurt_start).filter(|&d| d >= 0.0).collect()),

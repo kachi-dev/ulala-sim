@@ -8,6 +8,7 @@ mod single;
 use super::*;
 use batch::batch_view;
 use single::single_view;
+pub(super) use detail::{SPURT_KINDS, spurt_and_hp};
 
 #[component]
 pub fn ResultsTab() -> Element {

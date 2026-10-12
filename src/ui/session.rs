@@ -128,7 +128,7 @@ pub(super) fn horse_same(a: &HorseInput, b: &HorseInput) -> bool {
         && a.skills == b.skills
 }
 
-fn conditions_same(a: &RaceInput, b: &RaceInput) -> bool {
+pub(super) fn conditions_same(a: &RaceInput, b: &RaceInput) -> bool {
     (a.course_set_id, a.ground_condition, a.weather, a.season, a.time)
         == (b.course_set_id, b.ground_condition, b.weather, b.season, b.time)
 }

@@ -43,7 +43,8 @@ const SVG_STYLE: &str = "display:block;width:100%;height:auto;font-variant-numer
 
 /// 1/2/5 × 10^k step giving about `n` intervals over `range`.
 fn nice_step(range: f32, n: usize) -> f32 {
-    let raw = (range / n as f32).max(1e-6);
+    // At least one interval: a chart in a hidden pane measures 0 px wide and asks for none.
+    let raw = (range / n.max(1) as f32).max(1e-6);
     let mag = 10f32.powf(raw.log10().floor());
     mag * [1.0, 2.0, 5.0, 10.0].into_iter().find(|&f| raw / mag <= f + 1e-4).unwrap()
 }

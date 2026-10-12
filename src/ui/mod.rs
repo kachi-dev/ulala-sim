@@ -9,6 +9,7 @@ mod saves;
 mod session;
 mod setup;
 mod skills;
+mod stamina;
 mod widgets;
 
 use jobs::*;
@@ -52,6 +53,7 @@ enum Tab {
     Results,
     Gains,
     Ranking,
+    Stamina,
 }
 
 #[derive(Clone)]
@@ -102,6 +104,20 @@ struct RankRes {
     low_spurt: Vec<String>,
     /// Combinations asked for (fewer come back when cancelled).
     asked: usize,
+    rev: u64,
+}
+
+#[derive(Clone)]
+struct StamRes {
+    card: i32,
+    chara: i32,
+    st: Arc<Stamina>,
+    /// The field it ran in (NPCs included).
+    field: Arc<Vec<HorseInput>>,
+    /// The same uma and seeds on the pinned baseline, when it differs where it matters.
+    base: Option<Arc<Stamina>>,
+    cv: Arc<CourseView>,
+    npc: bool,
     rev: u64,
 }
 
@@ -177,6 +193,14 @@ struct S {
     r_sort: Signal<(usize, bool)>,
     r_sel: Signal<Option<(i32, i32)>>,
     r_matrix: Signal<bool>,
+    // Stamina tab
+    st_npc: Signal<Option<bool>>,
+    st_n: Signal<usize>,
+    st_res: Signal<Option<StamRes>>,
+    /// Debuffs subtab (else Spurt).
+    st_debuffs: Signal<bool>,
+    /// (owner, skill) open in the debuffs table.
+    st_dsel: Signal<Option<(usize, i32)>>,
     g_n: Signal<usize>,
     g_res: Signal<Option<GainsRes>>,
     g_sort: Signal<(usize, bool)>,
@@ -246,6 +270,11 @@ pub fn App() -> Element {
         r_sort: use_signal(|| (1, true)),
         r_sel: use_signal(|| None),
         r_matrix: use_signal(|| true),
+        st_npc: use_signal(|| None),
+        st_n: use_signal(|| 500),
+        st_res: use_signal(|| None),
+        st_debuffs: use_signal(|| false),
+        st_dsel: use_signal(|| None),
         g_n: use_signal(|| 200),
         g_res: use_signal(|| None),
         g_sort: use_signal(|| (1, true)),
@@ -353,11 +382,13 @@ fn Workspace() -> Element {
                     {tab_btn(Tab::Results, "Results", stale())}
                     {tab_btn(Tab::Gains, "Skill gains", false)}
                     {tab_btn(Tab::Ranking, "Uma ranking", false)}
+                    {tab_btn(Tab::Stamina, "Stamina", false)}
                 }
                 // Always mounted: each pane keeps its scroll position and state across tab switches.
                 div { class: "pane", id: "pane-results", hidden: tab != Tab::Results, results::ResultsTab {} }
                 div { class: "pane", id: "pane-gains", hidden: tab != Tab::Gains, gains::GainsTab {} }
                 div { class: "pane", id: "pane-ranking", hidden: tab != Tab::Ranking, ranking::RankingTab {} }
+                div { class: "pane", id: "pane-stamina", hidden: tab != Tab::Stamina, stamina::StaminaTab {} }
             }
         }
     }

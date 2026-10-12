@@ -278,3 +278,47 @@ pub fn GainChart(rows: Vec<(String, String, [f32; 6], usize)>) -> Element {
         }
     }
 }
+
+/// One row per group: its values as jittered dots, a bar at the mean (value at the right), and the group's share of
+/// all values under the bar. `rows`: (label, color, values); empty groups are skipped. `unit` labels the x axis.
+#[component]
+pub fn StripChart(rows: Vec<(String, String, Vec<f32>)>, unit: String) -> Element {
+    let (mut size, cw) = use_width();
+    const L: f32 = 130.0;
+    const R: f32 = 70.0;
+    const ROW: f32 = 44.0;
+    const T: f32 = 12.0;
+    const B: f32 = 22.0;
+    let rows: Vec<_> = rows.into_iter().filter(|r| !r.2.is_empty()).collect();
+    let total = rows.iter().map(|r| r.2.len()).sum::<usize>().max(1) as f32;
+    let h = T + rows.len() as f32 * ROW + B;
+    let (lo, hi) = rows.iter().flat_map(|r| &r.2).fold((0.0f32, 0.0f32), |(a, b), &v| (a.min(v), b.max(v)));
+    let pw = cw - L - R;
+    let (lo, hi, step, ticks) = nice_domain(lo, hi, (pw / 80.0) as usize);
+    let x = move |v: f32| L + (v.clamp(lo, hi) - lo) / (hi - lo) * pw;
+    // Deterministic jitter in [-0.5, 0.5).
+    let jit = |k: usize| ((k as u32).wrapping_mul(2654435761) >> 22) as f32 / 1024.0 - 0.5;
+    rsx! {
+        svg { view_box: "0 0 {cw} {h}", style: SVG_STYLE, onresize: move |e| track(&mut size, e),
+            for &t in ticks.iter() {
+                line { x1: x(t), x2: x(t), y1: T, y2: h - B, stroke: "var(--grid)", stroke_width: 1 }
+            }
+            {x_labels(&ticks, x, h - 6.0, cw - R - 30.0, |t| format!("{} {unit}", fmt_tick(t, step, false)))}
+            for (k, (label, color, vals)) in rows.iter().enumerate() {
+                {
+                    let yy = T + k as f32 * ROW + 14.0;
+                    let mean = vals.iter().sum::<f32>() / vals.len() as f32;
+                    rsx! {
+                        text { x: L - 10.0, y: yy, fill: "var(--ink)", font_size: 12, font_weight: 700, text_anchor: "end", dominant_baseline: "middle", "{label}" }
+                        for (j, &v) in vals.iter().enumerate() {
+                            circle { cx: x(v), cy: yy + jit(j) * 14.0, r: 2, fill: "{color}", fill_opacity: 0.45 }
+                        }
+                        line { x1: x(mean), x2: x(mean), y1: yy - 10.0, y2: yy + 10.0, stroke: "var(--ink)", stroke_width: 2.5 }
+                        text { x: x(mean), y: yy + 22.0, fill: "var(--muted)", font_size: 11, font_weight: 700, text_anchor: "middle", "{100.0 * vals.len() as f32 / total:.1}%" }
+                        text { x: cw - R + 8.0, y: yy, fill: "var(--ink)", font_size: 12, font_weight: 800, dominant_baseline: "middle", "{mean:.2} {unit}" }
+                    }
+                }
+            }
+        }
+    }
+}
