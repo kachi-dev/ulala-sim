@@ -3,8 +3,10 @@
 ; -> target\installer\ulala-setup.exe. The exe is self-contained (icons embedded by build.rs); settings live in
 ; %LOCALAPPDATA%\ulala and are left alone on uninstall.
 
-; Keep in step with Cargo.toml.
-#define Version "0.1.0"
+; Release builds get the tag's version (/DVersion=, .github/workflows/release.yml).
+#ifndef Version
+  #define Version "dev"
+#endif
 
 [Setup]
 AppId={{6C1F7E2A-3D5B-4E8A-9B1C-0A2D4F6E8B13}

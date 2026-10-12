@@ -1,0 +1,31 @@
+# Push a tag matching Cargo.toml's version (git tag v0.1.0 && git push origin v0.1.0) to build the installer and
+# the plain exe from the pinned sim rev and publish them as a GitHub release.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches Cargo.toml
+        run: |
+          $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          if ("${{ github.ref_name }}" -ne "v$v") { throw "tag ${{ github.ref_name }} != Cargo.toml version $v" }
+      # Not --locked: Cargo.lock is written against the local sim patch (.cargo/config.toml), so CI fills in the
+      # pinned git rev; every other dependency still comes from the lock.
+      - run: cargo build --release
+      - run: choco install innosetup -y --no-progress
+      - run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DVersion=$("${{ github.ref_name }}".Substring(1))" ulala.iss'
+      - run: gh release create ${{ github.ref_name }} target/installer/ulala-setup.exe target/release/ulala.exe --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
