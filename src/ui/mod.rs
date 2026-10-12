@@ -188,7 +188,7 @@ pub fn App() -> Element {
         let name = req.uri().path().trim_start_matches("/a/").to_string();
         let found = match ASSETS.iter().find(|a| a.0 == name) {
             Some(&(_, mime, body)) => Some((mime, body.to_vec())),
-            None => icon_path(&name).and_then(|p| std::fs::read(p).ok()).map(|b| ("image/png", b)),
+            None => icon_bytes(&name).map(|b| ("image/png", b.to_vec())),
         };
         let r = match found {
             Some((mime, body)) => {

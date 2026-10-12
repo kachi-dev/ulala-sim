@@ -3,41 +3,18 @@
 
 use super::*;
 use crate::charts::horse_color;
-use std::path::Path;
-use std::sync::OnceLock;
 
 // ---------- icons ----------
 
-/// assets/icons (chara/, card/, skill/): next to the sources in dev, else next to the exe.
-fn icons_dir() -> &'static Path {
-    static DIR: OnceLock<PathBuf> = OnceLock::new();
-    DIR.get_or_init(|| {
-        let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icons");
-        let exe = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.join("assets/icons")));
-        if dev.is_dir() { dev } else { exe.unwrap_or(dev) }
-    })
+include!(concat!(env!("OUT_DIR"), "/icons.rs"));
+
+/// The embedded `<kind>/<file>` icon (build.rs), e.g. "chara/1001.png".
+pub(super) fn icon_bytes(rel: &str) -> Option<&'static [u8]> {
+    ICONS.binary_search_by_key(&rel, |i| i.0).ok().map(|i| ICONS[i].1)
 }
 
-/// rank: letter ranks by `rank_label` index - 1 (G … US9), apt: aptitude letters by grade (1 = G), stat: Speed … Wit.
-const ICON_KINDS: [&str; 6] = ["chara", "card", "skill", "rank", "apt", "stat"];
-
-/// `<kind>/<digits>.png` with a known kind, else None (the handler serves nothing else from disk).
-pub(super) fn icon_path(rel: &str) -> Option<PathBuf> {
-    let (kind, file) = rel.split_once('/')?;
-    let stem = file.strip_suffix(".png")?;
-    let ok = ICON_KINDS.contains(&kind) && !stem.is_empty() && stem.bytes().all(|b| b.is_ascii_digit());
-    ok.then(|| icons_dir().join(kind).join(file))
-}
-
-/// `<kind>/<file>` exists. The folders are listed once instead of a file check per icon per render.
 fn has_icon(rel: &str) -> bool {
-    static FILES: OnceLock<HashSet<String>> = OnceLock::new();
-    FILES
-        .get_or_init(|| {
-            let list = |k: &str| std::fs::read_dir(icons_dir().join(k)).into_iter().flatten().flatten();
-            ICON_KINDS.iter().flat_map(|&k| list(k).map(move |e| format!("{k}/{}", e.file_name().to_string_lossy()))).collect()
-        })
-        .contains(rel)
+    icon_bytes(rel).is_some()
 }
 
 /// Costume title ("[Bestest Prize ♪]"), "" when unknown.

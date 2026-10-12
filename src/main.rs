@@ -1,3 +1,6 @@
+// No console window behind the app in release builds.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod charts;
 #[cfg(windows)]
 mod chrome_win;

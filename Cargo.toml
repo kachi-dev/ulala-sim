@@ -2,6 +2,7 @@
 name = "ulala"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 # Bump `rev` to ship a newer sim. For local development against a sibling checkout, put in .cargo/config.toml:
@@ -24,3 +25,6 @@ opt-level = 3
 [target.'cfg(windows)'.dependencies]
 # Same version dioxus-desktop already pulls in; only for the frameless window chrome (src/chrome_win.rs).
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Registry", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+[build-dependencies]
+embed-resource = "3.0.12"
