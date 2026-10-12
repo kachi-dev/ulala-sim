@@ -187,3 +187,9 @@ fn change_uma() {
     assert_eq!((h.chara_id, h.proper_ground, h.proper_distance, h.running_style), (b.chara_id, fresh.proper_ground, fresh.proper_distance, fresh.running_style));
     assert_eq!(h.speed, 1500);
 }
+
+#[test]
+fn blob_sha_matches_git() {
+    // `printf 'hello\n' | git hash-object --stdin`
+    assert_eq!(blob_sha(b"hello\n"), "ce013625030ba8dba906f756967f9e9ca394464a");
+}

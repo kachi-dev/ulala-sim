@@ -1,10 +1,12 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Deserialize;
 use uma_race_sim::api::RaceInput;
 use uma_race_sim::data::{DATA_DIR, DataEra, GameData};
+
+use super::app_dir;
 
 pub(super) const STYLES: [&str; 4] = ["Front", "Pace", "Late", "End"];
 pub(super) const DISTANCES: [&str; 4] = ["Sprint", "Mile", "Medium", "Long"];
@@ -52,9 +54,80 @@ pub fn chara_name(id: i32) -> String {
     names().chara.get(&id).cloned().unwrap_or_else(|| format!("#{id}"))
 }
 
-/// `ULALA_DATA_DIR` at runtime, else the sim's build-time `DATA_DIR`.
+/// Where the game data comes from: GitHub, so game updates reach users without a new app build.
+const DATA_REPO: &str = "kachi-dev/uma-race-simulator";
+const DATA_BRANCH: &str = "master";
+/// Why the last `sync_data` failed, for the load error when there is no cached copy either.
+static SYNC_ERR: OnceLock<String> = OnceLock::new();
+
+/// `ULALA_DATA_DIR` at runtime, else the sim checkout this was built from (source builds), else the copy of the sim
+/// repo's `data/` in `%LOCALAPPDATA%/ulala/data`, synced from GitHub on the first call of each launch (`sync_data`).
 pub(super) fn data_dir() -> PathBuf {
-    std::env::var_os("ULALA_DATA_DIR").map_or_else(|| PathBuf::from(DATA_DIR), PathBuf::from)
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        if let Some(d) = std::env::var_os("ULALA_DATA_DIR") {
+            return d.into();
+        }
+        let Some(dir) = app_dir().map(|d| d.join("data")).filter(|_| !Path::new(DATA_DIR).is_dir()) else { return DATA_DIR.into() };
+        if let Err(e) = sync_data(&dir) {
+            let _ = SYNC_ERR.set(e);
+        }
+        dir
+    })
+    .clone()
+}
+
+/// Brings `dir` in line with `data/` on the sim repo's `DATA_BRANCH`: one API call lists it with git blob hashes, then
+/// every file whose local copy hashes differently is downloaded (first launch: all ~57 MB; a game update: usually a
+/// few hundred KB). Each file is checked against its hash and swapped in whole, so a failure keeps the old copy.
+// ponytail: whatever lands on master reaches every user's next launch, including a data change that needs newer sim
+// code than this build; a `data` release branch (or a format number in the repo) would gate that.
+fn sync_data(dir: &Path) -> Result<(), String> {
+    #[derive(Deserialize)]
+    struct Tree {
+        tree: Vec<Entry>,
+    }
+    #[derive(Deserialize)]
+    struct Entry {
+        path: String,
+        sha: String,
+        r#type: String,
+    }
+    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(120))).build().into();
+    let err = |e: ureq::Error| e.to_string();
+    let url = format!("https://api.github.com/repos/{DATA_REPO}/git/trees/{DATA_BRANCH}?recursive=1");
+    let json = agent.get(&url).header("User-Agent", "ulala").call().map_err(err)?.body_mut().read_to_string().map_err(err)?;
+    let tree: Tree = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    let todo: Vec<(&str, &str)> = tree
+        .tree
+        .iter()
+        .filter(|e| e.r#type == "blob")
+        .filter_map(|e| Some((e.path.strip_prefix("data/")?, e.sha.as_str())))
+        .filter(|(p, sha)| std::fs::read(dir.join(p)).map_or(true, |b| blob_sha(&b) != *sha))
+        .collect();
+    let fetch = |path: &str, sha: &str| -> Result<(), String> {
+        let url = format!("https://raw.githubusercontent.com/{DATA_REPO}/{DATA_BRANCH}/data/{path}");
+        let body = agent.get(&url).call().map_err(err)?.body_mut().with_config().limit(u64::MAX).read_to_vec().map_err(err)?;
+        // raw.githubusercontent caches for a few minutes after a push: a stale file waits for the next launch.
+        if blob_sha(&body) != sha {
+            return Err(format!("{path}: hash mismatch"));
+        }
+        let to = dir.join(path);
+        let part = to.with_file_name(format!("{}.part", to.file_name().unwrap_or_default().to_string_lossy()));
+        std::fs::create_dir_all(to.parent().unwrap_or(dir)).map_err(|e| e.to_string())?;
+        std::fs::write(&part, body).and_then(|_| std::fs::rename(&part, &to)).map_err(|e| format!("{}: {e}", to.display()))
+    };
+    let res = super::par_map(todo.len(), &super::Work::default(), |i| fetch(todo[i].0, todo[i].1));
+    res.into_iter().find_map(|r| r.1.err()).map_or(Ok(()), Err)
+}
+
+/// Git's blob hash of `bytes` (what the GitHub tree lists as `sha`).
+pub(super) fn blob_sha(bytes: &[u8]) -> String {
+    use sha1::{Digest, Sha1};
+    let mut h = Sha1::new();
+    h.update(format!("blob {}\0", bytes.len()));
+    h.update(bytes);
+    format!("{:x}", h.finalize())
 }
 
 /// GameData per era, loaded once. The load (seconds) runs outside the lock, which the UI thread takes for other eras
@@ -65,7 +138,11 @@ pub(super) fn game_data(era: DataEra) -> Result<Arc<GameData>, String> {
     if let Some(d) = cache().get(&era) {
         return Ok(d.clone());
     }
-    let d = Arc::new(GameData::load(&data_dir(), era.clone())?);
+    let d = GameData::load(&data_dir(), era.clone()).map_err(|e| match SYNC_ERR.get() {
+        Some(why) => format!("Couldn't download the game data ({why}). {e}"),
+        None => e,
+    })?;
+    let d = Arc::new(d);
     Ok(cache().entry(era).or_insert(d).clone())
 }
 
