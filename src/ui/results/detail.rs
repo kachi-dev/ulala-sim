@@ -162,7 +162,7 @@ fn outcome_bar(o: &[f32; 4]) -> Element {
 #[component]
 fn UmaLinks(i: usize, card: i32) -> Element {
     let s = use_context::<S>();
-    let (mut g_horse, mut g_owned, mut editing) = (s.g_horse, s.g_owned, s.editing);
+    let (mut sel, mut g_owned, mut editing) = (s.sel, s.g_owned, s.editing);
     let at = {
         let field = &s.input.read().horses;
         field.get(i).is_some_and(|h| h.card_id == card).then_some(i).or_else(|| field.iter().position(|h| h.card_id == card))
@@ -182,7 +182,7 @@ fn UmaLinks(i: usize, card: i32) -> Element {
             title: if at.is_some() { "Measure how many lengths each of this uma's skills is worth (Skill Gains tab)" } else { gone },
             onclick: move |_| {
                 if let Some(j) = at {
-                    g_horse.set(j);
+                    sel.set(j);
                     g_owned.set(true);
                     go(s, Tab::Gains);
                 }
@@ -226,6 +226,7 @@ fn skill_detail(st: &SkillStat, cv: &CourseView, color: &str, mut skill_sel: Sig
                 course_distance: cv.distance,
                 phases: cv.phases.to_vec(),
                 corners: cv.corner_spans(),
+                straights: cv.straights.iter().map(|c| (c.start, c.end)).collect::<Vec<_>>(),
                 bin: 10.0,
                 color: color.to_string(),
             }
@@ -276,29 +277,24 @@ fn spurt_and_hp(h: &HorseStats, cv: &CourseView, color: &str) -> Element {
     let mut late: Vec<f32> = h.spurt_delays.iter().copied().filter(|&d| d > SPURT_ON_TIME_M).collect();
     late.sort_by(f32::total_cmp);
     let med_late = late.get(late.len() / 2).copied();
-    let reduced = h.spurt_kinds[2] + h.spurt_kinds[3] > 0.0;
-    // Only runs below max speed: the full-speed ones (100%) would dwarf the rest.
-    let mut ratios: Vec<f32> = h.spurt_speed_ratio.iter().filter(|&&r| r < 0.9995).map(|r| r * 100.0).collect();
-    ratios.sort_by(f32::total_cmp);
-    let med_ratio = ratios.get(ratios.len() / 2).copied();
     let mut outs = h.hp_out_distances.clone();
     outs.sort_by(f32::total_cmp);
     let before_goal = outs.get(outs.len() / 2).map(|d| cv.distance - d);
     // Zoom to where it happens: from a round 50 m before the earliest HP-out (never before the start) to the goal.
     let zoom = outs.first().map_or(0.0, |&m| ((m - 50.0) / 50.0).floor().max(0.0) * 50.0);
     rsx! {
-        div { class: "cols",
-            div {
+        div { class: "spurt",
+            div { class: "sp-start",
                 h4 { "Last spurt start" }
                 div { class: "muted small",
-                    "Meters after the final-leg start ({fl:.0} m). On time in {pct(on_time)} of races"
+                    "Meters after the final-leg start ({fl:.0} m), decided at its first step. On time in {pct(on_time)} of races"
                     if let Some(m) = med_late { "; when late, typically {m:.0} m late" }
                     "."
                 }
                 // Delay, not position: starts are quantised by the sim step, so position bins would alternate empty.
                 DelayHist { values: h.spurt_delays.clone(), on_time: SPURT_ON_TIME_M, color: color.to_string() }
             }
-            div {
+            div { class: "sp-kind",
                 h4 { "Spurt quality" }
                 div { class: "kindbars",
                     for (k, f) in h.spurt_kinds.iter().enumerate() {
@@ -311,13 +307,8 @@ fn spurt_and_hp(h: &HorseStats, cv: &CourseView, color: &str) -> Element {
                         }
                     }
                 }
-                if reduced && !ratios.is_empty() {
-                    h4 { "Reduced spurt speed (% of max)" }
-                    div { class: "muted small", "{ratios.len()} reduced runs, median {med_ratio.unwrap_or(0.0):.1}% of max." }
-                    Histogram { values: ratios, color: "#e8ae1c".to_string(), unit: "%".to_string() }
-                }
             }
-            div {
+            div { class: "sp-hp",
                 h4 { "Ran out of stamina" }
                 if outs.is_empty() {
                     div { class: "small ok-line", "✓ Never ran out of stamina." }
@@ -335,7 +326,7 @@ fn spurt_and_hp(h: &HorseStats, cv: &CourseView, color: &str) -> Element {
                         distances: outs.clone(),
                         course_distance: cv.distance,
                         phases: cv.phases.to_vec(),
-                        corners: cv.corner_spans(),
+                        corners: vec![],
                         bin: if zoom > 0.0 { 10.0 } else { 25.0 },
                         color: "var(--bad)".to_string(),
                     }

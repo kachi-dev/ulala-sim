@@ -2,9 +2,34 @@
 //! on the same seeds, measured in horse lengths.
 
 use super::*;
-use crate::charts::{CourseHist, GainChart, Histogram};
+use crate::charts::{GainBars, GainChart, Histogram};
 
 const CHART_ROWS: usize = 20;
+/// Seeds for "Improve graph accuracy": one skill re-measured alone, for smoother detail charts.
+const ACCURACY_N: usize = 2000;
+
+/// Re-measures skill `id` of the current measurement over `ACCURACY_N` fresh seeds (a random base, not the race's)
+/// in the same field and swaps it in.
+fn improve_accuracy(s: S, id: i32) {
+    let (Some(race), Some(r)) = (s.race.cloned(), s.g_res.cloned()) else { return };
+    let (mut input, i) = npc_field(&race, &s.input.peek(), r.horse, r.npc, r.lobby);
+    input.random_seed = random_seed();
+    let work = ACCURACY_N * 2 * input.horses.len();
+    let label = format!("Measuring {} × {} seeds", skill_info(id).name, thousands(ACCURACY_N));
+    let run = move |w: &Work| skill_gains(&race, &input, i, &[id], ACCURACY_N, w).0;
+    measure(s, label, ACCURACY_N, work, run, move |mut s, mut fresh| {
+        // Cancelled (no full sample set), or a new measurement replaced this one meanwhile: keep what's there.
+        let Some(g) = fresh.pop() else { return };
+        let mut res = s.g_res.write();
+        let Some(r) = res.as_mut().filter(|x| x.rev == r.rev && Arc::ptr_eq(&x.items, &r.items)) else { return };
+        let mut items = (*r.items).clone();
+        if let Some(k) = items.iter().position(|x| x.skill_id == id) {
+            items[k] = g;
+        }
+        items.sort_by(|a, b| b.lengths.mean.total_cmp(&a.lengths.mean));
+        r.items = Arc::new(items);
+    });
+}
 
 fn rarity_color(r: i32) -> &'static str {
     match r {
@@ -14,19 +39,17 @@ fn rarity_color(r: i32) -> &'static str {
     }
 }
 
-/// Detail charts of one measured gain (Uma ranking's too): where it activates with the gain at each activation, and
-/// gain per seed.
+/// Detail charts of one measured gain (Uma ranking's too): lengths gained by where it activates, and gain per seed.
 pub(super) fn gain_charts(samples: &[f32], by_distance: &[(f32, f32)], color: &str, cv: &CourseView, what: &str) -> Element {
     rsx! {
-        h4 { "Where {what} activates (bars) and lengths gained when it does (dots)" }
-        CourseHist {
-            distances: by_distance.iter().map(|p| p.0).collect::<Vec<f32>>(),
+        h4 { "Lengths gained by where {what} activates (average per 50 m)" }
+        GainBars {
+            by_distance: by_distance.to_vec(),
             course_distance: cv.distance,
             phases: cv.phases.to_vec(),
             corners: cv.corner_spans(),
-            bin: 10.0,
-            color: color.to_string(),
-            gains: by_distance.to_vec(),
+            straights: cv.straights.iter().map(|c| (c.start, c.end)).collect::<Vec<_>>(),
+            bin: 50.0,
         }
         h4 { "Gain per seed (lengths)" }
         Histogram { values: samples.to_vec(), color: color.to_string(), unit: "L".to_string() }
@@ -45,7 +68,7 @@ pub fn GainsTab() -> Element {
         };
     }
     let field_n = input.horses.len();
-    let hi = (*s.g_horse.read()).min(field_n - 1);
+    let hi = (*s.sel.read()).min(field_n - 1);
     let horse = input.horses[hi].clone();
     drop(input);
     let cv = s.cview.cloned();
@@ -67,7 +90,8 @@ pub fn GainsTab() -> Element {
         if cands.is_empty() {
             return;
         }
-        let (input, i) = npc_field(&race, &s.input.peek(), hi, npc, *s.npc_lobby.peek());
+        let lobby = *s.npc_lobby.peek();
+        let (input, i) = npc_field(&race, &s.input.peek(), hi, npc, lobby);
         let (cands, rev, field) = (cands.clone(), *s.rev.peek(), input.horses.clone());
         let (card, chara, asked) = (horse.card_id, horse.chara_id, cands.len());
         let label = format!("Measuring {} skills × {n} seeds", thousands(asked));
@@ -75,7 +99,7 @@ pub fn GainsTab() -> Element {
         measure(s, label, asked * n, work, run, move |mut s, (items, spurt)| {
             s.g_sel.set(None);
             let low_spurt = low_spurts(&field, &spurt);
-            s.g_res.set(Some(GainsRes { horse: hi, card, chara, items: Arc::new(items), cv, n, asked, npc, low_spurt, rev }));
+            s.g_res.set(Some(GainsRes { horse: hi, card, chara, items: Arc::new(items), cv, n, asked, npc, lobby, low_spurt, rev }));
             reveal("gains");
         });
     };
@@ -85,7 +109,7 @@ pub fn GainsTab() -> Element {
                 h3 { "Skill gains" }
             }
             div { class: "gsetup",
-                {who_pick(s, s.g_horse)}
+                {who_sel(s)}
                 {mode}
                 label { class: "field",
                     span { "Samples" }
@@ -129,6 +153,7 @@ fn GainsResults() -> Element {
     let s = use_context::<S>();
     let (sort, mut sel) = (s.g_sort, s.g_sel);
     let stale = use_stale(s, move || s.g_res.read().as_ref().map(|r| r.rev));
+    let running = use_busy(s);
     // The open skill can go to the measured uma: still at her gate, without it yet.
     let can_add = use_memo(move || {
         let (r, id) = (s.g_res.read(), *s.g_sel.read());
@@ -166,6 +191,36 @@ fn GainsResults() -> Element {
         })
         .collect();
     let selected = sel.cloned().and_then(|id| r.items.iter().find(|g| g.skill_id == id));
+    // The open skill's details, in a row under it.
+    let detail = selected.map(|g| {
+        let k = skill_info(g.skill_id);
+        let (horse, new) = (r.horse, learned(&k));
+        let id = g.skill_id;
+        rsx! {
+            div { class: "gdetail", id: "gdetail",
+                div { class: "kpis",
+                    div { b { "{g.lengths.mean:+.2}" } span { "mean lengths" } }
+                    div { b { "{g.lengths.p50:+.2}" } span { "median" } }
+                    div { b { "{g.lengths.min:+.2} to {g.lengths.max:+.2}" } span { "min to max" } }
+                    div { b { "{pct(g.rate)}" } span { "activates" } }
+                    if can_add() {
+                        button { class: "btn alt", onclick: move |_| add_skill(s, horse, new), "Add to {chara_name(r.chara)}" }
+                    }
+                    if g.samples.len() < ACCURACY_N {
+                        button {
+                            class: "btn ghost",
+                            disabled: running() || stale(),
+                            title: if stale() { "The setup changed since this measurement: measure again first" } else { "Run this skill alone over 2,000 seeds for smoother charts" },
+                            onclick: move |_| improve_accuracy(s, id),
+                            "Improve graph accuracy"
+                        }
+                    }
+                }
+                {skill_facts(g.skill_id, Some(r.cv.distance))}
+                {gain_charts(&g.samples, &g.by_distance, rarity_color(k.rarity), &r.cv, "it")}
+            }
+        }
+    });
     let partial = r.items.len() < r.asked;
     rsx! {
         div { id: "gains", class: "anchor" }
@@ -190,33 +245,6 @@ fn GainsResults() -> Element {
                 GainChart { rows: chart }
             }
         }
-        if let Some(g) = selected {
-            {
-                let k = skill_info(g.skill_id);
-                let (horse, new) = (r.horse, learned(&k));
-                rsx! {
-                    // Inline (not a drawer), so the pinned course above shows where it activates.
-                    section { class: "card detail", id: "gdetail",
-                        div { class: "card-h",
-                            {skill_row(&k, None, "big")}
-                            div { class: "grow" }
-                            button { class: "btn icon", title: "Close", onclick: move |_| sel.set(None), {icon("x")} }
-                        }
-                        div { class: "kpis",
-                            div { b { "{g.lengths.mean:+.2}" } span { "mean lengths" } }
-                            div { b { "{g.lengths.p50:+.2}" } span { "median" } }
-                            div { b { "{g.lengths.min:+.2} to {g.lengths.max:+.2}" } span { "min to max" } }
-                            div { b { "{pct(g.rate)}" } span { "activates" } }
-                            if can_add() {
-                                button { class: "btn alt", onclick: move |_| add_skill(s, horse, new), "Add to {chara_name(r.chara)}" }
-                            }
-                        }
-                        {skill_facts(g.skill_id, Some(r.cv.distance))}
-                        {gain_charts(&g.samples, &g.by_distance, rarity_color(k.rarity), &r.cv, "it")}
-                    }
-                }
-            }
-        }
         if !r.items.is_empty() {
             section { class: "card",
                 div { class: "scroll-x",
@@ -236,11 +264,12 @@ fn GainsResults() -> Element {
                                 tr {
                                     key: "{g.skill_id}",
                                     class: if sel.read().as_ref() == Some(&g.skill_id) { "sel" },
+                                    // Opens its details right under it; clicking it again closes them.
                                     onclick: {
                                         let id = g.skill_id;
                                         move |_| {
-                                            sel.set(Some(id));
-                                            reveal("gdetail");
+                                            let open = *sel.peek() == Some(id);
+                                            sel.set(if open { None } else { Some(id) });
                                         }
                                     },
                                     td { {skill_row(&k, None, "")} }
@@ -249,6 +278,11 @@ fn GainsResults() -> Element {
                                     td { class: "num muted", "{g.lengths.min:+.2}" }
                                     td { class: "num muted", "{g.lengths.max:+.2}" }
                                     td { class: "num", "{pct(g.rate)}" }
+                                }
+                                if sel.read().as_ref() == Some(&g.skill_id) {
+                                    tr { key: "{g.skill_id}-detail", class: "expand",
+                                        td { colspan: "6", {detail.clone()} }
+                                    }
                                 }
                             }
                         }

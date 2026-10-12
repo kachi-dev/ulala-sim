@@ -86,6 +86,8 @@ struct GainsRes {
     /// Candidates asked for (fewer come back when cancelled).
     asked: usize,
     npc: bool,
+    /// NPC lobby measured in (for "Improve fidelity", which re-measures one skill in the same field).
+    lobby: usize,
     /// Umas of the measured field with a low full-spurt rate (`low_spurts`).
     low_spurt: Vec<String>,
     rev: u64,
@@ -142,6 +144,9 @@ struct S {
     /// None = not checked (yet).
     verify: Signal<Option<Option<String>>>,
     res: Signal<Option<Res>>,
+    /// The selected uma (field index): picked in the setup's field, followed by Results, Skill gains and Uma ranking.
+    sel: Signal<usize>,
+    /// Results: the run gate shown in detail (batch) or focused (single run); None = all. See `select`.
     focus: Signal<Option<usize>>,
     /// (horse, skill) open in the batch uma detail: fine activation view + its region on the pinned course.
     skill_sel: Signal<Option<(usize, i32)>>,
@@ -155,7 +160,6 @@ struct S {
     err: Signal<Option<String>>,
     n: Signal<usize>,
     // Skill Gains tab
-    g_horse: Signal<usize>,
     g_filter: Signal<skills::SkillFilter>,
     g_owned: Signal<bool>,
     /// Some(true) = NPC field, Some(false) = this field, None = automatic (NPCs for a one-uma field).
@@ -165,7 +169,6 @@ struct S {
     /// Editor skill picker filters (kept between openings).
     pick_filter: Signal<skills::SkillFilter>,
     // Uma ranking tab
-    r_horse: Signal<usize>,
     r_npc: Signal<Option<bool>>,
     r_styles: Signal<Vec<i32>>,
     r_q: Signal<String>,
@@ -218,22 +221,21 @@ pub fn App() -> Element {
         rev: use_signal(|| 0),
         verify: use_signal(|| None),
         res: use_signal(|| None),
+        sel: use_signal(|| 0),
         focus: use_signal(|| None),
         skill_sel: use_signal(|| None),
         editing: use_signal(|| None),
         skill_pick: use_signal(|| false),
         picker: use_signal(|| false),
-        compact: use_signal(|| true),
+        compact: use_signal(compact_pref),
         job: use_signal(|| None),
         err: use_signal(|| None),
         n: use_signal(|| 1000),
-        g_horse: use_signal(|| 0),
         g_filter: use_signal(|| skills::SkillFilter { kinds: vec!["Gold"], ..Default::default() }),
         g_owned: use_signal(|| false),
         g_npc: use_signal(|| None),
         npc_lobby: use_signal(|| 2),
         pick_filter: use_signal(Default::default),
-        r_horse: use_signal(|| 0),
         r_npc: use_signal(|| None),
         r_styles: use_signal(|| vec![1, 2, 3, 4]),
         r_q: use_signal(String::new),

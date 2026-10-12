@@ -1,24 +1,29 @@
 use super::*;
 
+/// How often a skill activates along a stretch: (from m, to m, 0..1 of the busiest bin).
+pub type Bins = Vec<(f32, f32, f32)>;
+/// A `CourseProfile` region: (start m, end m, label, colour, bins).
+pub type Region = (f32, f32, String, String, Bins);
+
 /// Phase boundaries: 0, the phase starts inside the course, `d`.
 pub(super) fn phase_bounds(phases: &[f32], d: f32) -> Vec<f32> {
     std::iter::once(0.0).chain(phases.iter().copied().filter(|&p| p > 0.0 && p < d)).chain([d]).collect()
 }
 
 /// Activation distances binned finely (`bin` m) over the whole course, with the course's phases (late race and last
-/// spurt tinted) and corners shaded behind, so the bars line up with the track. Hover shows the bin and count.
-/// `start` = left end of the x axis (m), to zoom in on the end of the course (the axis then reads e.g. "1700 m").
-/// `gains` (distance, lengths): dots on a right-hand lengths axis, and the bin's mean gain in the hover readout.
+/// spurt tinted), corners (grey) and straights (light blue) marked under the axis, so the bars line up with the track.
+/// Hover shows the bin and count. `start` = left end of the x axis (m), to zoom in on the end of the course (the axis
+/// then reads e.g. "1700 m").
 #[component]
 pub fn CourseHist(
     distances: Vec<f32>, course_distance: f32, phases: Vec<f32>, corners: Vec<(f32, f32)>, bin: f32, color: String,
-    #[props(default)] start: f32, #[props(default)] gains: Vec<(f32, f32)>,
+    #[props(default)] start: f32, #[props(default)] straights: Vec<(f32, f32)>,
 ) -> Element {
     let (mut size, cw) = use_width();
     let mut hover = use_signal(|| None::<usize>);
     const H: f32 = 190.0;
     const L: f32 = 36.0;
-    let r = if gains.is_empty() { 14.0 } else { 46.0 };
+    const R: f32 = 14.0;
     const T: f32 = 22.0;
     const B: f32 = 40.0;
     let d = course_distance.max(1.0);
@@ -27,67 +32,153 @@ pub fn CourseHist(
     let nb = ((d - s0) / bw).ceil().max(1.0) as usize;
     let counts = bin_counts(distances.iter().copied().filter(|v| v.is_finite() && *v >= s0), s0, bw, nb);
     let total = distances.len().max(1);
-    let (pw, ph) = (cw - L - r, H - T - B);
+    let (pw, ph) = (cw - L - R, H - T - B);
     let x = move |m: f32| L + (m.clamp(s0, d) - s0) / (d - s0) * pw;
     let (cmax, cstep, cticks) = count_axis(*counts.iter().max().unwrap_or(&0));
     let y = move |c: f32| T + (1.0 - c / cmax) * ph;
-    let bounds = phase_bounds(&phases, d);
-    let ticks = dist_ticks(s0, d, pw);
-    let g_lo = gains.iter().map(|g| g.1).fold(0.0, f32::min);
-    let g_hi = gains.iter().map(|g| g.1).fold(0.0, f32::max);
-    let (g_lo, g_hi, g_step, g_ticks) = nice_domain(g_lo, g_hi, 4);
-    let gy = move |v: f32| T + (1.0 - (v - g_lo) / (g_hi - g_lo)) * ph;
     let read = hover().filter(|&i| i < nb).map(|i| {
         let a = s0 + i as f32 * bw;
-        let s = format!("{a:.0} to {:.0} m: {} ({:.1}%)", a + bw, counts[i], 100.0 * counts[i] as f32 / total as f32);
-        let g: Vec<f32> = gains.iter().filter(|g| g.0 >= a && g.0 < a + bw).map(|g| g.1).collect();
-        if g.is_empty() { s } else { format!("{s}, mean {:+.2} L", g.iter().sum::<f32>() / g.len() as f32) }
+        format!("{a:.0} to {:.0} m: {} ({:.1}%)", a + bw, counts[i], 100.0 * counts[i] as f32 / total as f32)
     });
     rsx! {
         svg { view_box: "0 0 {cw} {H}", style: SVG_STYLE, onresize: move |e| track(&mut size, e),
-            // Phase tint and labels along the bottom, corners as grey bands under the axis.
-            for (i, w) in bounds.windows(2).enumerate().filter(|(_, w)| w[1] > s0) {
-                rect { x: x(w[0]), y: T, width: (x(w[1]) - x(w[0])).max(0.0), height: ph, fill: if i >= 2 { "var(--accent)" } else { "transparent" }, fill_opacity: if i == 2 { 0.08 } else { 0.14 } }
-                if x(w[1]) - x(w[0]) > PHASES[i.min(3)].len() as f32 * 6.5 {
-                    text { x: (x(w[0]) + x(w[1])) / 2.0, y: H - 6.0, fill: "var(--muted)", font_size: 10.5, text_anchor: "middle", "{PHASES[i.min(3)]}" }
-                }
-                if i > 0 && w[0] > s0 {
-                    line { x1: x(w[0]), x2: x(w[0]), y1: T, y2: T + ph + 18.0, stroke: "var(--muted)", stroke_width: 1, stroke_dasharray: "3 3" }
-                }
-            }
+            {course_axis(x, &phase_bounds(&phases, d), s0, T, T + ph, H, cw - R, &corners, &straights, &dist_ticks(s0, d, pw))}
             if s0 > 0.0 {
-                text { x: cw - r, y: T - 8.0, fill: "var(--ink)", font_size: 11, font_weight: 700, text_anchor: "end", "Goal" }
-                line { x1: cw - r, x2: cw - r, y1: T - 4.0, y2: T + ph, stroke: "var(--ink)", stroke_width: 1.5 }
+                text { x: cw - R, y: T - 8.0, fill: "var(--ink)", font_size: 11, font_weight: 700, text_anchor: "end", "Goal" }
+                line { x1: cw - R, x2: cw - R, y1: T - 4.0, y2: T + ph, stroke: "var(--ink)", stroke_width: 1.5 }
             }
-            for &(a, b) in corners.iter().filter(|c| c.1 > s0) {
-                rect { x: x(a), y: T + ph + 2.0, width: (x(b) - x(a)).max(1.0), height: 5, rx: 2, fill: "var(--muted)", fill_opacity: 0.5 }
-            }
-            {y_grid(&cticks, y, L, cw - r, |t| fmt_tick(t, cstep, false))}
-            {x_labels(&ticks, x, T + ph + 18.0, cw - r - 24.0, |t| format!("{t} m"))}
+            {y_grid(&cticks, y, L, cw - R, |t| fmt_tick(t, cstep, false))}
             for (i, &c) in counts.iter().enumerate() {
                 if c > 0 {
                     rect { x: x(s0 + i as f32 * bw), y: y(c as f32), width: (pw / nb as f32).max(1.0), height: y(0.0) - y(c as f32), fill: "{color}", fill_opacity: if hover() == Some(i) { 0.7 } else { 1.0 } }
                 }
             }
-            line { x1: L, x2: cw - r, y1: y(0.0), y2: y(0.0), stroke: "var(--muted)", stroke_width: 1 }
-            if !gains.is_empty() {
-                for &t in &g_ticks {
-                    text { x: cw - r + 6.0, y: gy(t), fill: "var(--muted)", font_size: 11, dominant_baseline: "middle", "{fmt_tick(t, g_step, false)} L" }
-                }
-                if g_lo < 0.0 {
-                    line { x1: L, x2: cw - r, y1: gy(0.0), y2: gy(0.0), stroke: "var(--ink)", stroke_width: 1, stroke_dasharray: "3 3", stroke_opacity: 0.5 }
-                }
-                for &(d, g) in gains.iter().filter(|g| g.0 >= s0) {
-                    circle { cx: x(d), cy: gy(g), r: 2.2, fill: "var(--ink)", fill_opacity: 0.45 }
-                }
-            }
-            if let Some(s) = read { {readout(cw - r, 12.0, s)} }
+            line { x1: L, x2: cw - R, y1: y(0.0), y2: y(0.0), stroke: "var(--muted)", stroke_width: 1 }
+            if let Some(s) = read { {readout(cw - R, 12.0, s)} }
             g { onmouseleave: move |_| hover.set(None),
                 for i in 0..nb {
                     rect { x: x(s0 + i as f32 * bw), y: T, width: (pw / nb as f32).max(1.0), height: ph, fill: "transparent", onmouseenter: move |_| hover.set(Some(i)) }
                 }
             }
         }
+    }
+}
+
+/// Fewer activations than this in a bin: its gain bar is hollow (mostly noise), and it doesn't set the scale.
+const GAIN_MIN_N: usize = 5;
+
+/// Lengths gained by where a skill activated: per `bin` m, the average gain of the seeds that activated there (green
+/// ahead, red behind; hollow under `GAIN_MIN_N`), how often it activates there as a strip below, and the course's
+/// phases, corners and straights along the bottom. `by_distance` = (activation m, lengths) per seed.
+#[component]
+pub fn GainBars(
+    by_distance: Vec<(f32, f32)>, course_distance: f32, phases: Vec<f32>, corners: Vec<(f32, f32)>,
+    straights: Vec<(f32, f32)>, bin: f32,
+) -> Element {
+    let (mut size, cw) = use_width();
+    let mut hover = use_signal(|| None::<usize>);
+    const L: f32 = 52.0;
+    const R: f32 = 14.0;
+    const T: f32 = 22.0;
+    const PH: f32 = 130.0;
+    const STRIP: f32 = 16.0;
+    let strip_b = T + PH + 6.0 + STRIP;
+    let (axis_y, h) = (strip_b + 4.0, strip_b + 56.0);
+    let d = course_distance.max(1.0);
+    let bw = bin.max(1.0);
+    let nb = (d / bw).ceil().max(1.0) as usize;
+    // Per bin: activations, sum of gains, sorted gains (for the median).
+    let mut sums = vec![(0usize, 0f32, Vec::new()); nb];
+    for &(m, g) in by_distance.iter().filter(|p| p.0.is_finite() && p.1.is_finite()) {
+        let b = &mut sums[((m / bw).floor() as usize).min(nb - 1)];
+        b.0 += 1;
+        b.1 += g;
+        b.2.push(g);
+    }
+    for b in &mut sums {
+        b.2.sort_by(f32::total_cmp);
+    }
+    let mean = |i: usize| sums[i].1 / sums[i].0.max(1) as f32;
+    let total = by_distance.len().max(1);
+    let max_n = sums.iter().map(|b| b.0).max().unwrap_or(0).max(1);
+    // Scale from the trustworthy bins (all of them when none is); the others are clamped to it.
+    let solid: Vec<f32> = (0..nb).filter(|&i| sums[i].0 >= GAIN_MIN_N).map(mean).collect();
+    let scale: Vec<f32> = if solid.is_empty() { (0..nb).filter(|&i| sums[i].0 > 0).map(mean).collect() } else { solid };
+    let (lo, hi, step, ticks) = nice_domain(scale.iter().copied().fold(0.0, f32::min), scale.iter().copied().fold(0.0, f32::max), 4);
+    let pw = cw - L - R;
+    let x = move |m: f32| L + m.clamp(0.0, d) / d * pw;
+    let y = move |v: f32| T + (1.0 - (v.clamp(lo, hi) - lo) / (hi - lo)) * PH;
+    let read = hover().filter(|&i| i < nb).map(|i| {
+        let (a, n) = (i as f32 * bw, sums[i].0);
+        match n {
+            0 => format!("{a:.0} to {:.0} m: no activations", a + bw),
+            _ => format!(
+                "{a:.0} to {:.0} m: {n} activation{} ({:.1}%), average {:+.2} L, median {:+.2} L",
+                a + bw,
+                if n == 1 { "" } else { "s" },
+                100.0 * n as f32 / total as f32,
+                mean(i),
+                sums[i].2[n / 2]
+            ),
+        }
+    });
+    let bars: Vec<(usize, f32, usize)> = (0..nb).filter(|&i| sums[i].0 > 0).map(|i| (i, mean(i), sums[i].0)).collect();
+    rsx! {
+        svg { view_box: "0 0 {cw} {h}", style: SVG_STYLE, onresize: move |e| track(&mut size, e),
+            {course_axis(x, &phase_bounds(&phases, d), 0.0, T, axis_y, h, cw - R, &corners, &straights, &dist_ticks(0.0, d, pw))}
+            {y_grid(&ticks, y, L, cw - R, |t| format!("{} L", fmt_tick(t, step, false)))}
+            line { x1: L, x2: cw - R, y1: y(0.0), y2: y(0.0), stroke: "var(--muted)", stroke_width: 1 }
+            for &(i, m, n) in bars.iter() {
+                {
+                    let c = if m >= 0.0 { "var(--good)" } else { "var(--bad)" };
+                    let (bx, bwid) = (x(i as f32 * bw) + 1.0, (pw / nb as f32 - 2.0).max(1.0));
+                    let (top, bh) = (y(m).min(y(0.0)), (y(m) - y(0.0)).abs().max(1.0));
+                    let sh = 2.0 + (STRIP - 2.0) * n as f32 / max_n as f32;
+                    rsx! {
+                        if n >= GAIN_MIN_N {
+                            rect { x: bx, y: top, width: bwid, height: bh, rx: 2, fill: c, fill_opacity: if hover() == Some(i) { 0.75 } else { 1.0 } }
+                        } else {
+                            rect { x: bx + 0.6, y: top + 0.6, width: (bwid - 1.2).max(1.0), height: (bh - 1.2).max(1.0), rx: 2, fill: "none", stroke: c, stroke_width: 1.2 }
+                        }
+                        rect { x: bx, y: strip_b - sh, width: bwid, height: sh, rx: 1.5, fill: "var(--muted)", fill_opacity: 0.7 }
+                    }
+                }
+            }
+            text { x: L - 6.0, y: strip_b - 3.0, fill: "var(--muted)", font_size: 10, text_anchor: "end", "how often" }
+            if let Some(s) = read { {readout(cw - R, 12.0, s)} }
+            g { onmouseleave: move |_| hover.set(None),
+                for i in 0..nb {
+                    rect { x: x(i as f32 * bw), y: T, width: (pw / nb as f32).max(1.0), height: strip_b - T, fill: "transparent", onmouseenter: move |_| hover.set(Some(i)) }
+                }
+            }
+        }
+    }
+}
+
+/// The course under a distance chart from `s0` m: late race / last spurt tinted from `top` down to the corner and
+/// straight bands at `axis_y`, phase lines, distance labels below them and phase names along the bottom (`h`).
+#[allow(clippy::too_many_arguments)]
+fn course_axis(
+    x: impl Fn(f32) -> f32, bounds: &[f32], s0: f32, top: f32, axis_y: f32, h: f32, right: f32, corners: &[(f32, f32)],
+    straights: &[(f32, f32)], ticks: &[f32],
+) -> Element {
+    rsx! {
+        for (i, w) in bounds.windows(2).enumerate().filter(|(_, w)| w[1] > s0) {
+            rect { x: x(w[0]), y: top, width: (x(w[1]) - x(w[0])).max(0.0), height: axis_y - top, fill: if i >= 2 { "var(--accent)" } else { "transparent" }, fill_opacity: if i == 2 { 0.08 } else { 0.14 } }
+            if x(w[1]) - x(w[0]) > PHASES[i.min(3)].len() as f32 * 6.5 {
+                text { x: (x(w[0]) + x(w[1])) / 2.0, y: h - 6.0, fill: "var(--muted)", font_size: 10.5, text_anchor: "middle", "{PHASES[i.min(3)]}" }
+            }
+            if i > 0 && w[0] > s0 {
+                line { x1: x(w[0]), x2: x(w[0]), y1: top, y2: axis_y + 16.0, stroke: "var(--muted)", stroke_width: 1, stroke_dasharray: "3 3" }
+            }
+        }
+        for &(a, b) in corners.iter().filter(|c| c.1 > s0) {
+            rect { x: x(a), y: axis_y + 2.0, width: (x(b) - x(a)).max(1.0), height: 5, rx: 2, fill: "var(--muted)", fill_opacity: 0.5 }
+        }
+        for &(a, b) in straights.iter().filter(|c| c.1 > s0) {
+            rect { x: x(a), y: axis_y + 2.0, width: (x(b) - x(a)).max(1.0), height: 5, rx: 2, fill: "var(--accent-2)", fill_opacity: 0.6 }
+        }
+        {x_labels(ticks, &x, axis_y + 18.0, right - 24.0, |t| format!("{t} m"))}
     }
 }
 
@@ -190,12 +281,13 @@ pub(super) fn elevation_or_slopes(elevation: &[f32], slopes: &[(f32, f32, f32)],
 /// - `corners`, `straights`: (start m, end m); corners numbered, the last straight labelled as the final straight.
 /// - `slopes`: (start m, end m, grade %), + = uphill; tinted on the silhouette ridge and labelled.
 /// - `phases`: start m of Early race, Mid race, Late race, Last spurt (a leading 0 is optional).
-/// - `regions`: (start m, end m, label, colour) activation bars, packed into lanes above the track.
+/// - `regions`: (start m, end m, label, colour, bins) packed into lanes above the track: a bar, or with `bins`
+///   ((from m, to m, 0..1) along it) a little histogram of where it activates.
 /// Final leg (from `final_leg_start`) is pink. Hover shows metres, phase, corner/straight, grade and regions there.
 #[component]
 pub fn CourseProfile(
     distance: f32, elevation: Vec<f32>, corners: Vec<(f32, f32)>, straights: Vec<(f32, f32)>,
-    slopes: Vec<(f32, f32, f32)>, phases: Vec<f32>, final_leg_start: f32, regions: Vec<(f32, f32, String, String)>,
+    slopes: Vec<(f32, f32, f32)>, phases: Vec<f32>, final_leg_start: f32, regions: Vec<Region>,
 ) -> Element {
     let (mut size, cw) = use_width();
     let mut hover = use_signal(|| None::<f32>);
@@ -214,7 +306,7 @@ pub fn CourseProfile(
     let mut lane_end: Vec<f32> = vec![];
     let mut lanes = vec![(0usize, 0f32); regions.len()]; // (lane, label x)
     for &i in &order {
-        let (a, b, label, _) = &regions[i];
+        let (a, b, label, ..) = &regions[i];
         let lw = label.chars().count() as f32 * 6.8;
         let lx = x(*a).min(cw - R - lw);
         let k = lane_end.iter().position(|&e| e <= lx.min(x(*a))).unwrap_or_else(|| { lane_end.push(0.0); lane_end.len() - 1 });
@@ -279,9 +371,20 @@ pub fn CourseProfile(
             }
             {x_labels(&ticks, x, h - 7.0, cw - R - 24.0, |t| format!("{t} m"))}
             // Regions (activation bars) above the track.
-            for (i, (a, b, label, c)) in regions.iter().enumerate() {
+            for (i, (a, b, label, c, bins)) in regions.iter().enumerate() {
                 text { x: lanes[i].1, y: rg_y + lanes[i].0 as f32 * LANE + 9.0, fill: "var(--ink)", font_size: 11, "{label}" }
-                rect { x: x(*a), y: rg_y + lanes[i].0 as f32 * LANE + 12.0, width: (x(*b) - x(*a)).max(4.0), height: 5, rx: 2.5, fill: "{c}" }
+                if bins.is_empty() {
+                    rect { x: x(*a), y: rg_y + lanes[i].0 as f32 * LANE + 12.0, width: (x(*b) - x(*a)).max(4.0), height: 5, rx: 2.5, fill: "{c}" }
+                } else {
+                    // Faint baseline over the band, bars as tall as how often it starts there.
+                    rect { x: x(*a), y: rg_y + lanes[i].0 as f32 * LANE + 18.0, width: (x(*b) - x(*a)).max(1.0), height: 1, fill: "{c}", fill_opacity: 0.4 }
+                    for &(f, t, w) in bins.iter() {
+                        rect {
+                            x: x(f), y: rg_y + lanes[i].0 as f32 * LANE + 19.0 - (1.5 + 6.5 * w),
+                            width: (x(t) - x(f) - 0.5).max(1.0), height: 1.5 + 6.5 * w, fill: "{c}",
+                        }
+                    }
+                }
             }
             // Phase spans + boundary lines.
             for (i, w) in bounds.windows(2).enumerate() {

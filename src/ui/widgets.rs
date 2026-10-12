@@ -109,12 +109,11 @@ pub(super) fn player_now(race: &Race, input: &RaceInput) -> Option<usize> {
     race.player.filter(|_| input.horses.len() == race.input.horses.len())
 }
 
-/// Team / "you" tags next to a name.
+/// Team tag next to a name.
 pub(super) fn team_tags(input: &RaceInput, player: Option<usize>, i: usize) -> Element {
     let tag = team_tag(input, player, i);
     rsx! {
         if let Some((label, c)) = tag { span { class: "team", style: "--team: {c}", "{label}" } }
-        if player == Some(i) { span { class: "you", "You" } }
     }
 }
 
@@ -145,6 +144,28 @@ pub(super) fn skill_row(k: &SkillInfo, level: Option<i32>, extra: &str) -> Eleme
             span { class: "skn", "{k.name}" }
             if inh { span { class: "inh", "inherited" } }
             if let Some(l) = level.filter(|_| k.rarity >= 3) { span { class: "lv", "Lv{l}" } }
+        }
+    }
+}
+
+/// A "?" that opens a short explanation bubble; it closes on another click or when focus leaves. Keep it out of a
+/// `label`: the button would become the labelled control and take the label's hover and clicks from the input.
+#[component]
+pub(super) fn Help(children: Element) -> Element {
+    let mut open = use_signal(|| false);
+    rsx! {
+        span { class: "help",
+            button {
+                r#type: "button",
+                class: "help-q",
+                aria_label: "Help",
+                onclick: move |_| open.toggle(),
+                onblur: move |_| open.set(false),
+                "?"
+            }
+            if open() {
+                span { class: "help-pop", {children} }
+            }
         }
     }
 }
@@ -227,6 +248,7 @@ pub(super) fn icon(kind: &str) -> Element {
         "dup" => "M8 8h11v11H8zM5 16V5h11",
         "dice" => "M5 5h14v14H5zM9 9h.01M15 15h.01M15 9h.01M9 15h.01M12 12h.01",
         "x" => "M6 6l12 12M18 6L6 18",
+        "edit" => "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4",
         // Race conditions (CourseCard). Ground: firm ground, then 1 to 3 drops for Good / Soft / Heavy.
         "firm" => "M3 16h18M6 16l-2 4M11 16l-2 4M16 16l-2 4M21 16l-2 4",
         "good" => "M3 19h18M12 5c-2 3-3 4.5-3 6.5a3 3 0 0 0 6 0c0-2-1-3.5-3-6.5z",
@@ -270,25 +292,23 @@ pub(super) fn estimate(secs: f32) -> String {
     if secs < 60.0 { format!("about {:.0} s", secs.max(1.0)) } else { format!("about {:.0} min", (secs / 60.0).ceil()) }
 }
 
-/// Field icons to choose which uma is measured.
-pub(super) fn who_pick(s: S, mut sel: Signal<usize>) -> Element {
+/// The selected uma, measured by Skill gains and Uma ranking (picked in the setup's field).
+pub(super) fn who_sel(s: S) -> Element {
     let input = s.input.read();
     let race = s.race.cloned();
     let cols = uma_colors(&input, race.as_deref().and_then(|r| player_now(r, &input)));
-    let hi = (*sel.read()).min(input.horses.len().saturating_sub(1));
-    let tip = |h: &HorseInput| format!("{} {}", chara_name(h.chara_id), card_title(h.card_id));
-    let cur = input.horses.get(hi).map(|h| format!("{}, gate {}", tip(h), hi + 1));
+    let hi = (*s.sel.read()).min(input.horses.len().saturating_sub(1));
+    let Some(h) = input.horses.get(hi) else { return rsx! {} };
     rsx! {
         div { class: "field",
             span { "Uma" }
-            div { class: "who-pick",
-                for (i, h) in input.horses.iter().enumerate() {
-                    button { key: "{i}", class: if i == hi { "on" }, title: "{tip(h)}", onclick: move |_| sel.set(i),
-                        {horse_icon(h, Some(&cols[i]), "md")}
-                    }
+            div { class: "who-sel",
+                {horse_icon(h, Some(&cols[hi]), "md")}
+                div {
+                    b { "{chara_name(h.chara_id)}" }
+                    div { class: "muted small", "{card_title(h.card_id)}, gate {hi + 1} · select another in the field" }
                 }
             }
-            if let Some(c) = cur { b { "{c}" } }
         }
     }
 }

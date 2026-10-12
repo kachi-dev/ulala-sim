@@ -46,9 +46,20 @@ pub fn set_game_dir(dir: &Path) -> Result<Setup, String> {
     let mut p = paths();
     p.game = Some(dir.to_path_buf());
     p.output = horseact_output(dir);
-    save_settings(&Settings { game_dir: p.game.clone(), horseact_output: p.output.clone() });
+    save_settings(&Settings { game_dir: p.game.clone(), horseact_output: p.output.clone(), compact: p.compact });
     drop(p);
     Ok(setup())
+}
+
+/// The field shown as compact rows (else cards); compact until the user picks.
+pub fn compact_pref() -> bool {
+    paths().compact.unwrap_or(true)
+}
+
+pub fn set_compact_pref(on: bool) {
+    let mut p = paths();
+    p.compact = Some(on);
+    save_settings(&Settings { game_dir: p.game.clone(), horseact_output: p.output.clone(), compact: p.compact });
 }
 
 /// `%LOCALAPPDATA%/ulala`
@@ -62,6 +73,8 @@ struct Settings {
     #[serde(default)]
     game_dir: Option<PathBuf>,
     horseact_output: Option<PathBuf>,
+    #[serde(default)]
+    compact: Option<bool>,
 }
 
 fn settings_file() -> Option<PathBuf> {
@@ -80,6 +93,7 @@ struct Paths {
     /// horseACT's output folder.
     output: Option<PathBuf>,
     first: bool,
+    compact: Option<bool>,
 }
 
 /// Stored in `%LOCALAPPDATA%/ulala/settings.json`; looked up again while missing or gone (e.g. horseACT installed
@@ -91,12 +105,13 @@ fn paths() -> MutexGuard<'static, Paths> {
         let first = saved.is_none();
         let saved = saved.unwrap_or_default();
         let game = saved.game_dir.clone().filter(|d| is_game(d)).or_else(find_game);
+        let compact = saved.compact;
         if let Some(out) = saved.horseact_output.filter(|p| p.is_dir()) {
-            return Mutex::new(Paths { game, output: Some(out), first });
+            return Mutex::new(Paths { game, output: Some(out), first, compact });
         }
         let output = game.as_deref().and_then(horseact_output);
-        save_settings(&Settings { game_dir: saved.game_dir, horseact_output: output.clone() });
-        Mutex::new(Paths { game, output, first })
+        save_settings(&Settings { game_dir: saved.game_dir, horseact_output: output.clone(), compact });
+        Mutex::new(Paths { game, output, first, compact })
     })
     .lock()
     .unwrap_or_else(|e| e.into_inner())

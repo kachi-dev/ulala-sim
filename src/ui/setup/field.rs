@@ -7,6 +7,10 @@ const SKILLS_SHOWN: usize = 8;
 
 fn duplicate_horse(mut s: S, i: usize) {
     let h = s.input.read().horses[i].clone();
+    // The selection stays on the same uma.
+    if *s.sel.peek() > i {
+        *s.sel.write() += 1;
+    }
     edit_race(s, |inp| inp.horses.insert(i + 1, h));
     let mut t = s.trainers.write();
     let at = (i + 1).min(t.len());
@@ -16,6 +20,9 @@ fn duplicate_horse(mut s: S, i: usize) {
 }
 
 fn remove_horse(mut s: S, i: usize) {
+    if *s.sel.peek() > i {
+        *s.sel.write() -= 1;
+    }
     edit_race(s, |inp| {
         inp.horses.remove(i);
     });
@@ -26,10 +33,19 @@ fn remove_horse(mut s: S, i: usize) {
     s.focus.set(None);
 }
 
-/// Duplicate / remove buttons of one uma (cards and compact rows).
-fn uma_actions(s: S, i: usize, n: usize) -> Element {
+/// Edit / duplicate / remove buttons of one uma (cards and compact rows).
+fn uma_actions(mut s: S, i: usize, n: usize) -> Element {
     rsx! {
-        div { class: "uma-act",
+        div { class: "uma-act", ondoubleclick: |e| e.stop_propagation(),
+            button {
+                class: "btn icon",
+                title: "Edit (or double-click the uma)",
+                onclick: move |e| {
+                    e.stop_propagation();
+                    s.editing.set(Some(i));
+                },
+                {icon("edit")}
+            }
             button {
                 class: "btn icon",
                 title: "Duplicate",
@@ -68,14 +84,13 @@ pub(super) fn FieldCard() -> Element {
     let comparable_now = base.as_deref().is_none_or(|b| comparable(b, &input));
     let can_reset = base.as_deref().is_some_and(|b| differs(b, &input));
     let compact = *s.compact.read();
+    let sel = (*s.sel.read()).min(n.saturating_sub(1));
     let player = player_now(&race, &input);
     let cols = uma_colors(&input, player);
     let pair_base = base.as_deref().filter(|b| comparable(b, &input));
     let rows = input.horses.iter().enumerate().map(|(i, h)| {
         let b = pair_base.map(|b| &b.horses[i]);
         let (hs, bs) = (stats(h), stats(b.unwrap_or(h)));
-        let removed = b.map(|b| removed_skills(b, h)).unwrap_or_default();
-        let added = |k: &SkillInput| b.is_some_and(|b| !b.skills.iter().any(|x| x.skill_id == k.skill_id));
         let apts = key_apts(h, cv.as_deref());
         let poor = poor_apts(h, cv.as_deref());
         let trainer = trainers.get(i).cloned().unwrap_or_default();
@@ -100,15 +115,17 @@ pub(super) fn FieldCard() -> Element {
             rsx! {
                 div {
                     key: "{i}",
-                    class: if mask[i] { "umarow edited" } else { "umarow" },
+                    class: if sel == i { "umarow sel" } else { "umarow" },
                     style: "--ring: {cols[i]}",
-                    onclick: move |_| s.editing.set(Some(i)),
+                    onclick: move |_| select(s, i),
+                    ondoubleclick: move |_| s.editing.set(Some(i)),
+                    // On the top border, out of the layout: a tag in the name line would push the row taller.
+                    if mask[i] { span { class: "tag edited-badge", "edited" } }
                     span { class: "gate", "{i + 1}" }
                     {horse_icon(h, Some(&cols[i]), "md")}
                     div { class: "uma-name",
                         div { class: "ell",
                             b { "{chara_name(h.chara_id)}" }
-                            if mask[i] { span { class: "tag", "edited" } }
                         }
                         // Team tags on the second line: next to a long name they'd be cut by the ellipsis.
                         // Tags never truncate; the costume gives way first, then the trainer.
@@ -133,15 +150,17 @@ pub(super) fn FieldCard() -> Element {
             rsx! {
                 div {
                     key: "{i}",
-                    class: if mask[i] { "uma edited" } else { "uma" },
+                    class: if sel == i { "uma sel" } else { "uma" },
                     style: "--ring: {cols[i]}",
-                    onclick: move |_| s.editing.set(Some(i)),
+                    onclick: move |_| select(s, i),
+                    ondoubleclick: move |_| s.editing.set(Some(i)),
+                    // On the top border, out of the layout: a tag in the name line would push the row taller.
+                    if mask[i] { span { class: "tag edited-badge", "edited" } }
                     div { class: "uma-h",
                         {horse_icon(h, Some(&cols[i]), "lg")}
                         div { class: "uma-name",
                             b { "{chara_name(h.chara_id)}" }
                             {team_tags(&input, player, i)}
-                            if mask[i] { span { class: "tag", "edited" } }
                             div { class: "muted small", "{title}" }
                             div { class: "muted small", if trainer.is_empty() { "Gate {i + 1}" } else { "Gate {i + 1} · {trainer}" } }
                         }
@@ -152,26 +171,7 @@ pub(super) fn FieldCard() -> Element {
                         div { class: "warn", "Poor aptitude here: {p}. Speed and skill effects are heavily reduced." }
                     }
                     div { class: "uma-stats", {stat_cells} }
-                    div { class: "uma-skills",
-                        for (_, k) in game_order(&h.skills).into_iter().take(SKILLS_SHOWN) {
-                            SkillX { id: k.skill_id, level: Some(k.level), extra: if added(&k) { "added" } else { "" } }
-                        }
-                        if h.skills.len() > SKILLS_SHOWN {
-                            span { class: "more", "+{h.skills.len() - SKILLS_SHOWN} more" }
-                        }
-                        for k in removed {
-                            {skill_row(&skill_info(k.skill_id), None, "removed")}
-                        }
-                        button {
-                            class: "skadd",
-                            onclick: move |e| {
-                                e.stop_propagation();
-                                s.editing.set(Some(i));
-                                s.skill_pick.set(true);
-                            },
-                            "+ Add skill"
-                        }
-                    }
+                    {skill_list(s, i, h, b.unwrap_or(h), false)}
                 }
             }
         }
@@ -181,10 +181,16 @@ pub(super) fn FieldCard() -> Element {
         details { class: "card fold", open: true,
             summary { class: "card-h",
                 h3 { "Field" }
-                span { class: "muted", "{n} of {MAX_FIELD} · click an uma to edit" }
+                span { class: "muted", "{n} of {MAX_FIELD} · click to select, double-click to edit" }
                 div { class: "seg small",
-                    button { class: if !compact { "on" }, onclick: move |_| s.compact.set(false), "Cards" }
-                    button { class: if compact { "on" }, onclick: move |_| s.compact.set(true), "Compact" }
+                    button { class: if !compact { "on" }, onclick: move |_| {
+                            s.compact.set(false);
+                            set_compact_pref(false);
+                        }, "Cards" }
+                    button { class: if compact { "on" }, onclick: move |_| {
+                            s.compact.set(true);
+                            set_compact_pref(true);
+                        }, "Compact" }
                 }
                 div { class: "grow" }
                 if !comparable_now {
@@ -226,7 +232,87 @@ pub(super) fn FieldCard() -> Element {
     }
 }
 
+/// Uma `i`'s skills (`h`) against its baseline `b`: rows that expand on click, an X to remove, removed ones to click
+/// back, "+ Add skill". The card (`full` false) lists `SKILLS_SHOWN`; the drawer lists all with unique level inputs.
+/// Clicks stop here, so it can sit in the clickable card.
+pub(super) fn skill_list(mut s: S, i: usize, h: &HorseInput, b: &HorseInput, full: bool) -> Element {
+    let shown = if full { usize::MAX } else { SKILLS_SHOWN };
+    let removed = removed_skills(b, h);
+    rsx! {
+        div { class: "skgrid", ondoubleclick: |e| e.stop_propagation(),
+            for (j, k) in game_order(&h.skills).into_iter().take(shown) {
+                {
+                    let base_k = b.skills.iter().find(|x| x.skill_id == k.skill_id).copied();
+                    let lvl_input = full && skill_info(k.skill_id).rarity >= 3 && !skill_info(k.skill_id).inherited;
+                    rsx! {
+                        div { key: "{k.skill_id}", class: "skedit",
+                            SkillX {
+                                id: k.skill_id,
+                                level: if lvl_input { None } else { Some(k.level) },
+                                extra: if base_k.is_none() { "added" } else { "" },
+                            }
+                            if lvl_input {
+                                label { class: if base_k.is_some_and(|x| x.level != k.level) { "lvl chg" } else { "lvl" }, title: "Unique skill level",
+                                    "Lv"
+                                    input {
+                                        id: "lvl-{j}",
+                                        r#type: "number",
+                                        min: 1,
+                                        max: 6,
+                                        value: "{k.level}",
+                                        oninput: move |e| {
+                                            if let Ok(v) = e.value().parse::<i32>() {
+                                                edit(s, i, |h| h.skills[j].level = v.clamp(1, 6));
+                                            }
+                                        },
+                                        onchange: move |_| resync(&format!("lvl-{j}"), s.input.peek().horses[i].skills[j].level),
+                                    }
+                                }
+                            }
+                            button {
+                                class: "btn icon",
+                                title: "Remove skill",
+                                onclick: move |e| {
+                                    e.stop_propagation();
+                                    edit(s, i, |h| {
+                                        h.skills.remove(j);
+                                    });
+                                },
+                                {icon("x")}
+                            }
+                        }
+                    }
+                }
+            }
+            if h.skills.len() > shown {
+                span { class: "more", "+{h.skills.len() - shown} more" }
+            }
+            for k in removed {
+                div {
+                    key: "{k.skill_id}",
+                    class: "restore",
+                    title: "Removed; click to restore",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                        add_skill(s, i, k);
+                    },
+                    {skill_row(&skill_info(k.skill_id), None, "removed")}
+                }
+            }
+            button {
+                class: "skadd",
+                onclick: move |e| {
+                    e.stop_propagation();
+                    s.editing.set(Some(i));
+                    s.skill_pick.set(true);
+                },
+                "+ Add skill"
+            }
+        }
+    }
+}
+
 /// Skills in `base` that `h` no longer has (by id: a level change is not a removal).
-pub(super) fn removed_skills(base: &HorseInput, h: &HorseInput) -> Vec<SkillInput> {
+fn removed_skills(base: &HorseInput, h: &HorseInput) -> Vec<SkillInput> {
     base.skills.iter().filter(|k| !h.skills.iter().any(|x| x.skill_id == k.skill_id)).copied().collect()
 }

@@ -164,7 +164,7 @@ pub fn DelayHist(values: Vec<f32>, on_time: f32, color: String) -> Element {
         svg { view_box: "0 0 {cw} {H}", style: SVG_STYLE, onresize: move |e| track(&mut size, e),
             // Legend above the plot (not over the bars).
             rect { x: L, y: 4, width: 10, height: 10, rx: 2, fill: "var(--good)" }
-            text { x: L + 14.0, y: 13, fill: "var(--ink)", font_size: 11, "On time (up to {on_time} m, decided at the first step of the final leg)" }
+            text { x: L + 14.0, y: 13, fill: "var(--ink)", font_size: 11, "On time (up to {on_time} m)" }
             {y_grid(&cticks, y, L, cw - R, |t| fmt_tick(t, cstep, false))}
             {x_labels(&xticks, x, H - 8.0, cw - R - 30.0, |t| format!("{} m", fmt_tick(t, xstep, false)))}
             for (k, &c) in counts.iter().enumerate() {

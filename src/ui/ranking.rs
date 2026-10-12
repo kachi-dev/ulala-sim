@@ -36,7 +36,7 @@ pub fn RankingTab() -> Element {
         return rsx! { section { class: "card", p { class: "muted", "Add an uma in Setup first." } } };
     }
     let field_n = input.horses.len();
-    let hi = (*s.r_horse.read()).min(field_n - 1);
+    let hi = (*s.sel.read()).min(field_n - 1);
     drop(input);
     let styles = r_styles.cloned();
     let ql = r_q.read().to_lowercase();
@@ -80,7 +80,7 @@ pub fn RankingTab() -> Element {
                 }
             }
             div { class: "gsetup",
-                {who_pick(s, s.r_horse)}
+                {who_sel(s)}
                 {mode}
                 div { class: "field",
                     span { "Styles" }

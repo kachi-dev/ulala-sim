@@ -242,7 +242,8 @@ td.skills > .skr + .skr { margin-top: 3px; }
 }
 .uma::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 4px; border-radius: 0 4px 4px 0; background: var(--ring); }
 .uma:hover { border-color: var(--line); }
-.uma.edited { border-color: var(--accent); }
+.edited-badge { position: absolute; top: -8px; right: 14px; margin: 0; z-index: 1; pointer-events: none; }
+.uma.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .uma-h { display: flex; align-items: center; gap: 12px; }
 .uma-name { flex: 1; min-width: 0; }
 .uma-name b { font-size: 15.5px; }
@@ -256,7 +257,6 @@ td.skills > .skr + .skr { margin-top: 3px; }
 .uma-stats b { font-size: 15px; }
 .uma-stats .chg { background: var(--accent-soft); color: var(--accent-ink); }
 .more { font-size: 12px; font-weight: 700; color: var(--muted); align-self: center; padding-left: 6px; }
-.uma-skills { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
 .uma.add { flex-direction: row; align-items: center; justify-content: center; gap: 8px; border: 2px dashed var(--line); background: transparent; color: var(--muted); font-weight: 800; font-size: 15px; }
 .uma.add::before { display: none; }
 .uma.add .plus { font-size: 22px; line-height: 1; color: var(--accent); }
@@ -278,11 +278,23 @@ td.skills > .skr + .skr { margin-top: 3px; }
 .drawer-b { flex: 1; overflow: auto; padding: 4px 18px 18px; }
 .drawer-f { display: flex; justify-content: space-between; padding: 12px 18px; border-top: 1px solid var(--line); }
 .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
-.stats label, .two label { display: grid; gap: 3px; font-size: 12px; font-weight: 800; color: var(--muted); }
+.stats label, .two > * { display: grid; gap: 3px; font-size: 12px; font-weight: 800; color: var(--muted); }
 .stats input { width: 100%; padding: 6px; text-align: right; }
 .stats small { font-weight: 600; }
 .stats .chg input, .two .chg select, .apt.chg select, .lvl.chg input { border-color: var(--accent); background: var(--accent-soft); }
-.stats .chg span, .two .chg span, .apt.chg { color: var(--accent-ink); }
+.stats .chg span, .two .chg > span, .apt.chg { color: var(--accent-ink); }
+.help { position: relative; display: inline-block; }
+.help-q {
+  display: inline-grid; place-items: center; box-sizing: border-box; user-select: none;
+  width: 15px; height: 15px; padding: 0; border-radius: 50%; border: 1.5px solid var(--line); background: transparent;
+  color: var(--muted); font: inherit; font-size: 10px; line-height: 1; cursor: pointer; vertical-align: 1px;
+}
+.help-q:hover, .help-q:focus-visible { border-color: var(--accent); color: var(--accent-ink); }
+.help-pop {
+  position: absolute; z-index: 20; top: calc(100% + 6px); left: -6px; width: 240px; padding: 8px 10px;
+  background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow);
+  color: var(--ink); font-size: 12px; font-weight: 500; text-transform: none; letter-spacing: normal; line-height: 1.4;
+}
 .two { display: grid; grid-template-columns: 0.8fr 1fr 1fr; gap: 10px; margin-top: 12px; }
 .apt-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .apt { display: grid; gap: 2px; font-size: 11.5px; font-weight: 700; color: var(--muted); }
@@ -290,10 +302,10 @@ td.skills > .skr + .skr { margin-top: 3px; }
 .sklist { display: grid; gap: 4px; }
 .skedit { display: flex; align-items: center; gap: 6px; }
 .skedit .skr { flex: 1; min-width: 0; max-width: none; }
+.skedit > .btn.icon { padding: 2px 5px; font-size: 15px; }
 .lvl { font-size: 11.5px; font-weight: 800; color: var(--muted); display: flex; align-items: center; gap: 4px; }
 .lvl input { width: 52px; padding: 3px 6px; }
-.restore { margin-top: 10px; display: grid; gap: 4px; }
-.restore > div { cursor: pointer; }
+.restore { cursor: pointer; }
 .modal {
   position: fixed; z-index: 10; left: 50%; top: calc(var(--titlebar-h) + 2vh); transform: translateX(-50%); width: min(980px, 92vw); max-height: calc(96vh - var(--titlebar-h));
   display: flex; flex-direction: column; background: var(--surface); border-radius: 18px; overflow: hidden; box-shadow: 0 20px 60px rgba(0, 0, 0, .35);
@@ -316,6 +328,10 @@ table.grid { border-collapse: collapse; width: 100%; }
 .grid tbody tr:hover { background: var(--hover); }
 .grid tr.edited { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .grid tr.sel { background: var(--accent-2-soft); box-shadow: inset 3px 0 0 var(--accent-2); }
+/* A table row's details (Skill gains), opened under it. */
+.grid tr.expand, .grid tr.expand:hover { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent-2); cursor: default; }
+.grid tr.expand > td { padding: 10px 14px 16px; white-space: normal; }
+.gdetail .kpis > div { background: var(--surface); }
 .grid .num { text-align: right; white-space: nowrap; }
 .grid td.ok, .grid td.good { color: var(--good); font-weight: 800; }
 .grid td.no { color: var(--bad); }
@@ -368,10 +384,7 @@ table.grid { border-collapse: collapse; width: 100%; }
 
 /* ---------- skill gains ---------- */
 .gsetup { display: flex; flex-wrap: wrap; gap: 14px 24px; margin-bottom: 12px; align-items: flex-start; }
-.who-pick { display: flex; flex-wrap: wrap; gap: 6px; max-width: 640px; }
-.who-pick button { border: 0; background: none; padding: 4px; border-radius: 50%; cursor: pointer; opacity: .5; }
-.who-pick button:hover { opacity: .85; }
-.who-pick button.on { opacity: 1; background: var(--accent-soft); }
+.who-sel { display: flex; align-items: center; gap: 10px; }
 table.gains td:first-child { width: 42%; }
 table.gains td { padding-top: 3px; padding-bottom: 3px; }
 
@@ -406,13 +419,13 @@ table.gains td { padding-top: 3px; padding-bottom: 3px; }
 /* compact field rows */
 .umas.compact { display: flex; flex-direction: column; gap: 6px; }
 .umarow {
-  display: grid; grid-template-columns: 26px 44px minmax(150px, 1fr) 236px 290px 150px 64px;
+  display: grid; grid-template-columns: 26px 44px minmax(150px, 1fr) 236px 290px 150px auto;
   align-items: center; gap: 10px; padding: 6px 10px 6px 12px; border-radius: 12px; background: var(--surface-2);
   border: 1.5px solid transparent; cursor: pointer; position: relative; text-align: left; font: inherit; color: inherit;
 }
 .umarow::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 4px; border-radius: 0 4px 4px 0; background: var(--ring); }
 .umarow:hover { border-color: var(--line); }
-.umarow.edited { border-color: var(--accent); }
+.umarow.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .umarow .gate { margin: 0; text-align: center; font-size: 13px; }
 .umarow .uma-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .umarow .uma-tags { flex-wrap: nowrap; }
@@ -424,6 +437,7 @@ table.gains td { padding-top: 3px; padding-bottom: 3px; }
 .umarow .uma-stats b { font-size: 13.5px; }
 .umarow .uma-sk { display: flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; }
 .umarow .uma-sk .skr { min-width: 0; flex: 1; }
+.umarow .uma-act .btn.icon { padding: 2px 5px; }
 .umarow.add { display: flex; justify-content: center; gap: 8px; border: 2px dashed var(--line); background: transparent; color: var(--muted); font-weight: 800; min-height: 44px; }
 .umarow.add::before { display: none; }
 .umarow.add .plus { font-size: 22px; color: var(--accent); line-height: 1; }
@@ -471,12 +485,12 @@ table.gains td { padding-top: 3px; padding-bottom: 3px; }
 /* Compact rows size to the setup pane (container queries), not the window. */
 .umas { container-type: inline-size; }
 @container (max-width: 1000px) {
-  .umarow { grid-template-columns: 22px 40px minmax(0, 1fr) 236px auto 56px; gap: 8px; padding-left: 10px; }
+  .umarow { grid-template-columns: 22px 40px minmax(0, 1fr) 236px auto auto; gap: 8px; padding-left: 10px; }
   .umarow .uma-tags { display: none; }
   .umarow .uma-sk .muted { display: none; }
 }
 @container (max-width: 620px) {
-  .umarow { grid-template-columns: 20px 36px minmax(0, 1fr) 200px 56px; gap: 6px; }
+  .umarow { grid-template-columns: 20px 36px minmax(0, 1fr) 200px auto; gap: 6px; }
   .umarow .uma-stats span { font-size: 9.5px; }
   .umarow .uma-stats b { font-size: 12.5px; }
   .umarow .uma-sk { display: none; }
@@ -508,6 +522,7 @@ table.gains td { padding-top: 3px; padding-bottom: 3px; }
 .chip-btn.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .btn.small { padding: 4px 12px; font-size: 12.5px; }
 .scrim.top { z-index: 11; }
+.modal.over { z-index: 12; }
 .modal.picker-modal { z-index: 12; width: min(1100px, 94vw); height: calc(92vh - var(--titlebar-h)); }
 .pick-filters { padding: 10px 18px 0; border-bottom: 1px solid var(--line); max-height: 40%; overflow: auto; }
 .pick-count { padding: 8px 18px 0; }
@@ -520,8 +535,6 @@ table.gains td { padding-top: 3px; padding-bottom: 3px; }
 .pick-meta { display: flex; flex-wrap: wrap; gap: 3px; }
 .pick-meta span { font-size: 10.5px; font-weight: 700; padding: 0 6px; border-radius: 6px; background: var(--surface-2); color: var(--sub-ink); }
 .pick-meta .owned-tag { background: var(--good); color: var(--on-accent); }
-.sk-head { display: flex; align-items: center; justify-content: space-between; margin: 14px 0 6px; }
-.sk-head h4 { margin: 0; }
 .skgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 8px; }
 .skgrid .skedit .skr { flex: 1; min-width: 0; }
 .skgrid .lvl input { width: 44px; }
@@ -578,7 +591,7 @@ table.matrix td.never { color: var(--muted); background: repeating-linear-gradie
 .margin { font-size: 11px; font-weight: 700; color: var(--accent-ink); }
 .small.no { color: var(--bad); }
 .row2.fit { display: flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; overflow: hidden; }
-.row2.fit > .team, .row2.fit > .you { flex: none; margin-left: 0; }
+.row2.fit > .team { flex: none; margin-left: 0; }
 .row2.fit > .costume, .row2.fit > .trainer { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .row2.fit > .costume { flex: 0 1000 auto; }
 .row2.fit > .trainer { flex: 0 1 auto; }
@@ -587,6 +600,19 @@ table.matrix td.never { color: var(--muted); background: repeating-linear-gradie
 /* Narrow field: with a trainer to show, drop the costume title rather than squeeze it to a stub. */
 @container (max-width: 700px) {
   .row2.fit > .costume:not(:last-child) { display: none; }
+}
+/* Batch detail spurt row, sized to the results pane: three columns when wide, the quality bars over the two charts
+   in the middle, one column when narrow. Charts sit at the bottom of their cells so the two line up. */
+.spurt { display: grid; grid-template-columns: 1fr minmax(220px, .75fr) 1fr; grid-template-areas: "s q h"; gap: 18px; margin-bottom: 8px; }
+.sp-start { grid-area: s; } .sp-kind { grid-area: q; } .sp-hp { grid-area: h; }
+.spurt > div { display: flex; flex-direction: column; min-width: 0; }
+.spurt > div > svg { margin-top: auto; }
+@container (max-width: 1100px) {
+  .spurt { grid-template-columns: 1fr 1fr; grid-template-areas: "q q" "s h"; }
+  .sp-kind .kindbars { max-width: 560px; }
+}
+@container (max-width: 700px) {
+  .spurt { grid-template-columns: 1fr; grid-template-areas: "s" "q" "h"; }
 }
 .kindbars { display: grid; gap: 6px; margin: 6px 0 10px; }
 .kb { display: grid; grid-template-columns: 130px 1fr 52px; align-items: center; gap: 8px; font-size: 12.5px; cursor: help; }
@@ -644,7 +670,6 @@ table.matrix td.never { color: var(--muted); background: repeating-linear-gradie
 .seg.icons button { padding: 3px; line-height: 0; }
 .seg.icons .ico { width: 17px; height: 17px; stroke-width: 1.8; }
 /* An expanded skill on a field card spans the card. */
-.uma-skills .skx.open { grid-column: 1 / -1; }
 
 /* Field card: aptitude tags beside the name; "Add skill" tile among the skills. */
 .uma-h .uma-name { flex: 0 1 auto; }

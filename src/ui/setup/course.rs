@@ -142,10 +142,7 @@ pub(super) fn CourseCard() -> Element {
                         button {
                             class: "btn icon",
                             title: "Random seed",
-                            onclick: move |_| {
-                                let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-                                edit_race(s, |inp| inp.random_seed = (t.as_nanos() % 2_000_000_000) as i32);
-                            },
+                            onclick: move |_| edit_race(s, |inp| inp.random_seed = random_seed()),
                             {icon("dice")}
                         }
                     }

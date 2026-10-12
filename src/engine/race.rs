@@ -88,8 +88,9 @@ pub fn runaway(race: &Race, h: &HorseInput) -> bool {
     running_style_ex(&race.data.skills, h) == RunningStyleEx::Oonige
 }
 
-/// Switches costume: card/chara id, and the old card's unique skill becomes the new card's (same level; appended at
-/// level 4 if it wasn't there; dropped if the new one is already owned). Stats, aptitudes and other skills stay.
+/// Switches costume or uma: card/chara id, and the old card's unique skill becomes the new card's (same level;
+/// appended at level 4 if it wasn't there; dropped if the new one is already owned). Stats and other skills stay;
+/// aptitudes and running style stay for a costume, and become the new uma's when the character changes.
 pub fn set_card(h: &mut HorseInput, card_id: i32) {
     let Some(c) = names().card.get(&card_id) else { return };
     let old = names().card.get(&h.card_id).map(|o| o.2);
@@ -101,6 +102,13 @@ pub fn set_card(h: &mut HorseInput, card_id: i32) {
         }
         None if !has_new => h.skills.push(SkillInput { skill_id: c.2, level: 4 }),
         _ => {}
+    }
+    if c.1 != h.chara_id {
+        let apt = |k: usize| c.4[k];
+        h.proper_distance = [apt(0), apt(1), apt(2), apt(3)];
+        h.proper_running_style = [apt(4), apt(5), apt(6), apt(7)];
+        h.proper_ground = [apt(8), apt(9)];
+        h.running_style = c.3;
     }
     (h.card_id, h.chara_id) = (card_id, c.1);
 }

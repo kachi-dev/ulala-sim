@@ -7,7 +7,7 @@ mod field;
 mod run;
 
 use super::*;
-use crate::charts::CourseProfile;
+use crate::charts::{Bins, CourseProfile, Region};
 use course::CourseCard;
 pub use drawer::{Drawer, Picker};
 use field::FieldCard;
@@ -51,19 +51,31 @@ pub fn RaceContext() -> Element {
     }
 }
 
-type Region = (f32, f32, String, String);
-
-/// p10-p90 band of activation distances (at least a sliver wide), None when it never activated.
-fn span(distances: &[f32], course: f32) -> Option<(f32, f32)> {
+/// p10-p90 band of activation distances (at least a sliver wide) and how often it activates along it: (from m, to m,
+/// share of the busiest bin) in ~1/120-course bins, so it reads as where it starts, not how long it lasts. None when
+/// it never activated.
+fn span(distances: &[f32], course: f32) -> Option<(f32, f32, Bins)> {
     let mut d: Vec<f32> = distances.iter().copied().filter(|&x| x >= 1.0).collect();
     d.sort_by(f32::total_cmp);
     let q = |p: f32| d[((d.len() - 1) as f32 * p).round() as usize];
-    (!d.is_empty()).then(|| (q(0.1), q(0.9).max(q(0.1) + course * 0.008)))
+    if d.is_empty() {
+        return None;
+    }
+    let (a, b) = (q(0.1), q(0.9).max(q(0.1) + course * 0.008));
+    let bw = course / 120.0;
+    let nb = ((b - a) / bw).ceil().max(1.0) as usize;
+    let mut counts = vec![0usize; nb];
+    for &x in d.iter().filter(|&&x| x >= a && x <= b) {
+        counts[(((x - a) / bw) as usize).min(nb - 1)] += 1;
+    }
+    let max = *counts.iter().max().unwrap_or(&1) as f32;
+    let bins = counts.iter().enumerate().filter(|c| *c.1 > 0).map(|(i, &c)| (a + i as f32 * bw, (a + (i + 1) as f32 * bw).min(b), c as f32 / max)).collect();
+    Some((a, b, bins))
 }
 
 /// The band of one skill (an open skill or unique), as the only region.
 fn one_region(name: &str, distances: &[f32], course: f32) -> Vec<Region> {
-    span(distances, course).map(|(a, b)| (a, b, format!("{name} (p10-p90)"), "var(--accent)".to_string())).into_iter().collect()
+    span(distances, course).map(|(a, b, bins)| (a, b, format!("{name} (p10-p90)"), "var(--accent)".to_string(), bins)).into_iter().collect()
 }
 
 /// The course, pinned above the analysis tabs. Regions follow the tab: Results = the focused uma's activations (all
@@ -86,7 +98,7 @@ pub fn TopCourse() -> Element {
             Some(r) => {
                 let (reg, need) = regions(&r, *s.focus.read());
                 if need {
-                    hint = Some("Click an uma in the results to see where its skills activate.");
+                    hint = Some("Select an uma to see where its skills activate.");
                 }
                 reg
             }
@@ -140,16 +152,16 @@ fn regions(res: &Res, focus: Option<usize>) -> (Vec<Region>, bool) {
             let len = res.cv.distance * 0.012;
             for a in cur.activations.iter().filter(|a| who.contains(&a.horse) && a.distance >= 1.0).take(MAX_REGIONS) {
                 let end = (a.distance + len).min(res.cv.distance);
-                out.push((a.distance, end, skill_info(a.skill_id).name, res.colors[a.horse].clone()));
+                out.push((a.distance, end, skill_info(a.skill_id).name, res.colors[a.horse].clone(), vec![]));
             }
         }
         Kind::Batch { cur, .. } => {
             let mut rated = vec![];
             for &h in &who {
                 for st in &cur.horses[h].skills {
-                    if let Some((a, b)) = span(&st.distances, res.cv.distance) {
+                    if let Some((a, b, bins)) = span(&st.distances, res.cv.distance) {
                         let label = format!("{} {:.0}%", skill_info(st.skill_id).name, st.rate * 100.0);
-                        rated.push((st.rate, (a, b, label, res.colors[h].clone())));
+                        rated.push((st.rate, (a, b, label, res.colors[h].clone(), bins)));
                     }
                 }
             }

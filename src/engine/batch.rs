@@ -119,8 +119,6 @@ pub struct HorseStats {
     pub spurt_kinds: [f32; 5],
     /// spurt_start − final-leg start (m), per seed that spurted.
     pub spurt_delays: Vec<f32>,
-    /// spurt_speed / max_spurt_speed, per seed that spurted.
-    pub spurt_speed_ratio: Vec<f32>,
     /// `HorseRun::hp_out_at`, per seed that ran out of HP.
     pub hp_out_distances: Vec<f32>,
 }
@@ -191,7 +189,6 @@ pub fn run_batch(race: &Race, input: &RaceInput, seeds: &[i32], w: &Work) -> Bat
                 goal_speeds: hr.iter().map(|x| x.goal_speed).collect(),
                 spurt_kinds: std::array::from_fn(|kind| rate(&|x| x.spurt_kind as usize == kind)),
                 spurt_delays: hr.iter().filter(|x| x.spurt_kind < 4).map(|x| x.spurt_delay).collect(),
-                spurt_speed_ratio: hr.iter().filter(|x| x.spurt_kind < 4).map(|x| x.spurt_speed / x.max_spurt_speed).collect(),
                 hp_out_distances: hr.iter().filter_map(|x| x.hp_out_at).collect(),
             }
         })

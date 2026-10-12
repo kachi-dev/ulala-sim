@@ -69,11 +69,12 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                             {
                                 let h = &cur.horses[i];
                                 let d = diffs.as_ref().map(|d| &d[i]);
+                                let card = res.input.horses[i].card_id;
                                 rsx! {
                                     tr {
                                         key: "{i}",
                                         class: if f == Some(i) { "sel" } else if ed[i] { "edited" },
-                                        onclick: move |_| focus.set(if f == Some(i) { None } else { Some(i) }),
+                                        onclick: move |_| if f == Some(i) { focus.set(None) } else { focus_gate(s, i, card) },
                                         td { class: "place",
                                             b { "{h.place}" }
                                             if let Some(d) = d {

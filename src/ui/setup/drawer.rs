@@ -1,7 +1,7 @@
 //! Uma picker and the per-uma edit drawer.
 
 use super::*;
-use super::field::removed_skills;
+use super::field::skill_list;
 use std::rc::Rc;
 
 // ---------- uma picker ----------
@@ -18,6 +18,8 @@ pub fn Picker() -> Element {
     if !*s.picker.read() {
         return rsx! {};
     }
+    // Opened from the edit drawer: the pick replaces that uma instead of adding one.
+    let replace = s.editing.cloned();
     let ql = q.read().to_lowercase();
     // Costumes grouped by character (cards() is sorted by name, then card id).
     let mut groups: Vec<(&str, i32, Vec<&CardInfo>)> = vec![];
@@ -28,10 +30,10 @@ pub fn Picker() -> Element {
         }
     }
     rsx! {
-        div { class: "scrim", onclick: move |_| s.picker.set(false) }
-        div { class: if vets() { "modal vets-modal" } else { "modal" },
+        div { class: "scrim top", onclick: move |_| s.picker.set(false) }
+        div { class: if vets() { "modal over vets-modal" } else { "modal over" },
             div { class: "drawer-h",
-                h3 { "Add an uma" }
+                h3 { if replace.is_some() { "Change uma" } else { "Add an uma" } }
                 div { class: "seg small",
                     button { class: if !vets() { "on" }, onclick: move |_| vets.set(false), "Characters" }
                     button { class: if vets() { "on" }, onclick: move |_| vets.set(true), "Veterans" }
@@ -46,7 +48,7 @@ pub fn Picker() -> Element {
                 button { class: "btn icon", title: "Close", onclick: move |_| s.picker.set(false), {icon("x")} }
             }
             if vets() {
-                VeteranList { q: ql, sort, need, apt_min }
+                VeteranList { q: ql, sort, need, apt_min, replace }
             } else {
             div { class: "cgroups",
                 if groups.is_empty() { p { class: "muted", "No uma matches." } }
@@ -60,12 +62,18 @@ pub fn Picker() -> Element {
                                     class: "chara",
                                     title: "{c.name} {c.title}",
                                     onclick: move |_| {
+                                        if let Some(i) = replace {
+                                            edit(s, i, |h| set_card(h, c.card_id));
+                                            s.picker.set(false);
+                                            return;
+                                        }
                                         let Some(race) = s.race.cloned() else { return };
                                         let h = new_horse(&race, c.card_id);
                                         let i = s.input.read().horses.len();
                                         edit_race(s, |inp| inp.horses.push(h));
                                         s.trainers.write().push(String::new());
                                         s.picker.set(false);
+                                        select(s, i);
                                         s.editing.set(Some(i));
                                     },
                                     {uma_icon(c.card_id, c.chara_id, None, "xl")}
@@ -104,7 +112,13 @@ fn rank_img(rank: i32, class: &str) -> Element {
 /// horseACT's veteran list as cards: name / costume search (`q`), required skills, aptitude minimums, sort. Click
 /// adds the uma as trained. Mounted only while shown, so every opening reads the list fresh.
 #[component]
-fn VeteranList(q: String, mut sort: Signal<usize>, mut need: Signal<Vec<i32>>, mut apt_min: Signal<[i32; 10]>) -> Element {
+fn VeteranList(
+    q: String,
+    mut sort: Signal<usize>,
+    mut need: Signal<Vec<i32>>,
+    mut apt_min: Signal<[i32; 10]>,
+    replace: Option<usize>,
+) -> Element {
     let mut s = use_context::<S>();
     let list = use_hook(|| Rc::new(load_veterans()));
     let mut skill_q = use_signal(String::new);
@@ -228,8 +242,15 @@ fn VeteranList(q: String, mut sort: Signal<usize>, mut need: Signal<Vec<i32>>, m
                                 let Some(race) = s.race.cloned() else { return };
                                 let mut h = h.clone();
                                 h.skills.retain(|k| race.data.skills.contains_key(&k.skill_id));
-                                edit_race(s, |inp| inp.horses.push(h));
-                                s.trainers.write().push(String::new());
+                                if let Some(i) = replace {
+                                    edit_race(s, |inp| inp.horses[i] = h);
+                                    if let Some(t) = s.trainers.write().get_mut(i) {
+                                        t.clear();
+                                    }
+                                } else {
+                                    edit_race(s, |inp| inp.horses.push(h));
+                                    s.trainers.write().push(String::new());
+                                }
                                 s.picker.set(false);
                             },
                             div { class: "vc-h",
@@ -303,7 +324,6 @@ pub fn Drawer() -> Element {
     drop(input);
     let changed = !horse_same(&h, &b);
     let (hs, bs) = (stats(&h), stats(&b));
-    let removed = removed_skills(&b, &h);
     let costumes: Vec<&CardInfo> = cards().iter().filter(|c| c.chara_id == h.chara_id).collect();
     let apt = |label: &'static str, cur: i32, base: i32, set: fn(&mut HorseInput, i32)| {
         rsx! {
@@ -335,6 +355,7 @@ pub fn Drawer() -> Element {
                     div { class: "muted small", "{card_title(h.card_id)}" }
                     div { class: "muted small", if trainer.is_empty() { "Gate {i + 1}" } else { "Gate {i + 1} · {trainer}" } }
                 }
+                button { class: "btn ghost", title: "Pick a different uma; stats, skills and team stay", onclick: move |_| s.picker.set(true), "Change uma" }
                 button { class: "btn icon", title: "Close", onclick: move |_| s.editing.set(None), {icon("x")} }
             }
             div { class: "drawer-b",
@@ -379,10 +400,11 @@ pub fn Drawer() -> Element {
                     }
                 }
                 div { class: "two",
-                    label { class: if h.team_id != b.team_id { "chg" },
-                        span { "Team" }
+                    div { class: if h.team_id != b.team_id { "chg" },
+                        span { "Team "
+                            Help { "Teams replicate CM teams - umas in the same team won't affect one another with debuffs." }
+                        }
                         select {
-                            title: "Team races (e.g. Champions Meeting): teammates share a colour family",
                             onchange: move |e| edit(s, i, |h| h.team_id = e.value().parse().unwrap_or(0)),
                             for (v, name) in [(0, "None"), (1, "Team 1"), (2, "Team 2"), (3, "Team 3")] {
                                 option { value: "{v}", selected: h.team_id == v, "{name}" }
@@ -423,55 +445,8 @@ pub fn Drawer() -> Element {
                     {apt("Late", h.proper_running_style[2], b.proper_running_style[2], |h, v| h.proper_running_style[2] = v)}
                     {apt("End", h.proper_running_style[3], b.proper_running_style[3], |h, v| h.proper_running_style[3] = v)}
                 }
-                div { class: "sk-head",
-                    h4 { "Skills ({h.skills.len()})" }
-                    button { class: "btn alt small", onclick: move |_| picking.set(true), "+ Add skill" }
-                }
-                div { class: "skgrid",
-                    for (j, k) in game_order(&h.skills) {
-                        {
-                            let info = skill_info(k.skill_id);
-                            let base_k = b.skills.iter().find(|x| x.skill_id == k.skill_id).copied();
-                            let unique = info.rarity >= 3 && !info.inherited;
-                            rsx! {
-                                div { key: "{k.skill_id}", class: "skedit",
-                                    SkillX { id: k.skill_id, extra: if base_k.is_none() { "added" } else { "" } }
-                                    if unique {
-                                        label { class: if base_k.is_some_and(|x| x.level != k.level) { "lvl chg" } else { "lvl" }, title: "Unique skill level",
-                                            "Lv"
-                                            input {
-                                                id: "lvl-{j}",
-                                                r#type: "number",
-                                                min: 1,
-                                                max: 6,
-                                                value: "{k.level}",
-                                                oninput: move |e| {
-                                                    if let Ok(v) = e.value().parse::<i32>() {
-                                                        edit(s, i, |h| h.skills[j].level = v.clamp(1, 6));
-                                                    }
-                                                },
-                                                onchange: move |_| resync(&format!("lvl-{j}"), s.input.peek().horses[i].skills[j].level),
-                                            }
-                                        }
-                                    }
-                                    button { class: "btn icon", title: "Remove skill", onclick: move |_| edit(s, i, |h| { h.skills.remove(j); }), {icon("x")} }
-                                }
-                            }
-                        }
-                    }
-                }
-                if !removed.is_empty() {
-                    div { class: "restore",
-                        span { class: "muted small", "Removed, click to restore:" }
-                        for k in removed {
-                            div {
-                                key: "{k.skill_id}",
-                                onclick: move |_| add_skill(s, i, k),
-                                {skill_row(&skill_info(k.skill_id), None, "removed")}
-                            }
-                        }
-                    }
-                }
+                h4 { "Skills ({h.skills.len()})" }
+                {skill_list(s, i, &h, &b, true)}
             }
             div { class: "drawer-f",
                 button {

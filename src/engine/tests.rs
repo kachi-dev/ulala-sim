@@ -167,3 +167,23 @@ fn cm_from_save() {
     assert_eq!((id(10606, "2025-09-01"), id(10606, "2026-05-20")), (Some(1), Some(13)));
     assert_eq!((id(11103, "2026-08-14"), id(10606, "2025-01-01")), (Some(17), None));
 }
+
+#[test]
+fn change_uma() {
+    let race = new_race();
+    let cs = cards();
+    let a = &cs[0];
+    let b = cs.iter().find(|c| c.chara_id != a.chara_id).unwrap();
+    let mut h = new_horse(&race, a.card_id);
+    h.proper_ground = [1, 1];
+    h.speed = 1500;
+    // A costume of the same uma keeps edited aptitudes; another uma brings its own. Stats stay either way.
+    if let Some(a2) = cs.iter().find(|c| c.chara_id == a.chara_id && c.card_id != a.card_id) {
+        set_card(&mut h, a2.card_id);
+        assert_eq!(h.proper_ground, [1, 1]);
+    }
+    set_card(&mut h, b.card_id);
+    let fresh = new_horse(&race, b.card_id);
+    assert_eq!((h.chara_id, h.proper_ground, h.proper_distance, h.running_style), (b.chara_id, fresh.proper_ground, fresh.proper_distance, fresh.running_style));
+    assert_eq!(h.speed, 1500);
+}

@@ -25,11 +25,9 @@ fn install(mut s: S, (race, all, courses, cv): Loaded) {
     s.focus.set(None);
     s.skill_sel.set(None);
     s.editing.set(None);
-    s.compact.set(true);
     s.g_res.set(None);
     s.g_sel.set(None);
-    s.g_horse.set(0);
-    s.r_horse.set(0);
+    s.sel.set(0);
     s.r_res.set(None);
     s.r_sel.set(None);
     s.race.set(Some(race));
@@ -58,12 +56,15 @@ pub(super) fn restore(s: S) {
         let r = job(s, "Warming up", 0, false, |_| {
             restore_session().map(|r| {
                 let cv = Arc::new(course_view(&r.race, r.input.course_set_id));
-                (prepare(r.race), r.input, r.trainers, r.baseline, cv)
+                // A save's server check isn't stored: run its seed again, as opening it does.
+                let v = r.race.path.is_some().then(|| verify_against_server(&r.race, &run_once(&r.race, &r.race.input)));
+                (prepare(r.race), r.input, r.trainers, r.baseline, cv, v)
             })
         })
         .await;
-        let Ok((Some((l, input, trainers, baseline, cv)), _)) = r else { return new_custom(s) };
+        let Ok((Some((l, input, trainers, baseline, cv, v)), _)) = r else { return new_custom(s) };
         install(s, l);
+        s.verify.set(v);
         s.input.set(input);
         s.trainers.set(trainers);
         s.baseline.set(baseline.map(Arc::new));
@@ -168,6 +169,35 @@ pub(super) fn reset_to_baseline(mut s: S) {
     s.focus.set(None);
     s.editing.set(None);
     *s.rev.write() += 1;
+}
+
+/// A fresh race seed from the clock (non-negative, like the game's).
+pub(super) fn random_seed() -> i32 {
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    (t.as_nanos() % 2_000_000_000) as i32
+}
+
+/// Gate `i` of `field` if it is costume `card`, else the first uma of that costume: the same uma across a past run
+/// and the current field.
+pub(super) fn same_uma(field: &[HorseInput], i: usize, card: i32) -> Option<usize> {
+    field.get(i).is_some_and(|h| h.card_id == card).then_some(i).or_else(|| field.iter().position(|h| h.card_id == card))
+}
+
+/// Selects field uma `i`; the results focus follows to that uma in the last run (none if it isn't in it).
+pub(super) fn select(mut s: S, i: usize) {
+    s.sel.set(i);
+    let card = s.input.peek().horses.get(i).map(|h| h.card_id);
+    let at = s.res.peek().as_ref().zip(card).and_then(|(r, c)| same_uma(&r.input.horses, i, c));
+    s.focus.set(at);
+}
+
+/// Focuses gate `i` of the last run (uma `card`); the selection follows when that uma is still in the field.
+pub(super) fn focus_gate(mut s: S, i: usize, card: i32) {
+    s.focus.set(Some(i));
+    let at = same_uma(&s.input.peek().horses, i, card);
+    if let Some(j) = at {
+        s.sel.set(j);
+    }
 }
 
 pub(super) fn edit(mut s: S, i: usize, f: impl FnOnce(&mut HorseInput)) {
