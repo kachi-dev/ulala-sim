@@ -185,6 +185,11 @@ pub fn cm_presets() -> &'static [CmPreset] {
     &names().cm
 }
 
+/// A CM's conditions: "Firm · Sunny · Summer".
+pub fn cm_conditions(p: &CmPreset) -> String {
+    [pick(&GROUNDS, p.ground), pick(&WEATHERS, p.weather), pick(&SEASONS, p.season)].into_iter().flatten().collect::<Vec<_>>().join(" · ")
+}
+
 /// The CM a Champions Meeting save is from: the latest one on its course that started by `date` ("YYYY-MM-DD"), which
 /// tells repeat cups (same course) apart.
 pub fn cm_of_save(course_set_id: i32, date: &str) -> Option<&'static CmPreset> {

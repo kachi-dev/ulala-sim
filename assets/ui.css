@@ -790,3 +790,36 @@ table.matrix td.never { color: var(--muted); background: repeating-linear-gradie
 .subtabs { margin: 0 0 12px; }
 .hitbar { display: inline-block; width: 70px; height: 10px; vertical-align: middle; margin-right: 8px; }
 .hitv { display: inline-block; min-width: 46px; }
+
+/* ---------- CM tab ---------- */
+select.cm { font-weight: 800; font-size: 15px; }
+.stack { display: inline-flex; gap: 3px; }
+.stacks { display: grid; gap: 4px; }
+.teams-h { margin: 16px 0 6px; }
+.tag.line { background: none; color: var(--muted); box-shadow: inset 0 0 0 1.5px var(--line); }
+.tag.warn { background: var(--warn-bg); color: var(--warn-ink); box-shadow: inset 0 0 0 1px var(--warn-line); }
+/* Places: actual (solid) with the sim's (outline) over it. */
+.mini.vs { width: 126px; height: 28px; gap: 2px; }
+.mini.vs > div { background: none; height: 100%; position: relative; opacity: 1; }
+.mini.vs i, .mini.vs u { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 2px 2px 0 0; }
+.mini.vs i { background: var(--accent); opacity: .85; min-height: 1px; }
+.mini.vs u { box-shadow: inset 0 0 0 1.5px var(--accent-2); }
+.share { display: flex; gap: 2px; height: 8px; width: 140px; border-radius: 999px; overflow: hidden; background: var(--surface-2); }
+.sharecap { font-size: 11.5px; color: var(--muted); font-weight: 700; margin-top: 3px; white-space: nowrap; }
+.pbar { display: inline-block; width: 70px; height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; vertical-align: middle; margin-right: 8px; }
+.pbar > div { height: 100%; background: var(--accent-2); border-radius: 999px; }
+.posline { white-space: nowrap; font-weight: 700; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); font-weight: 700; align-items: center; margin-top: 8px; }
+.legend .sw { display: inline-block; width: 12px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.sw.act { background: var(--accent); }
+.sw.sim { box-shadow: inset 0 0 0 1.5px var(--accent-2); }
+svg.luckchart { max-width: 560px; display: block; }
+svg.luckchart .gridl { stroke: var(--grid); }
+svg.luckchart .lab { fill: var(--muted); font-size: 11px; font-weight: 700; }
+svg.luckchart polyline { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+svg.luckchart polyline.act { stroke: var(--accent); }
+svg.luckchart polyline.sim { stroke: var(--accent-2); stroke-dasharray: 5 4; }
+svg.luckchart circle.act { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+svg.luckchart .end { fill: var(--ink); font-size: 12px; font-weight: 800; }
+svg.luckchart .end.sim { fill: var(--accent-2-ink); }
+.kpis .cap { font-size: 11.5px; color: var(--muted); font-weight: 700; }

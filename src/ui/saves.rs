@@ -93,7 +93,7 @@ pub(super) fn SetupHint(heading: bool) -> Element {
 }
 
 /// horseACT's folder for Champions Meeting saves.
-const CM_CATEGORY: &str = "Champions meeting";
+pub(super) const CM_CATEGORY: &str = "Champions meeting";
 
 /// Max rows rendered (search narrows it).
 const LIST_CAP: usize = 300;
@@ -239,9 +239,9 @@ pub(super) fn SavesModal() -> Element {
                                         td { class: "who",
                                             if let Some(m) = m.filter(|m| !m.team.is_empty()) {
                                                 div { class: "whobox",
-                                                    for &(card, chara) in &m.team { {uma_icon(card, chara, None, "sm")} }
+                                                    for t in &m.team { {uma_icon(t.card, t.chara, None, "sm")} }
                                                     div {
-                                                        if let [(_, chara)] = m.team[..] { b { "{chara_name(chara)}" } }
+                                                        if let [t] = &m.team[..] { b { "{chara_name(t.chara)}" } }
                                                         if m.won { span { class: "you", "Won" } }
                                                         if !m.player_trainer.is_empty() { div { class: "muted small", "{m.player_trainer}" } }
                                                     }

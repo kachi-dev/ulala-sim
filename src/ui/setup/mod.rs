@@ -113,6 +113,7 @@ pub fn TopCourse() -> Element {
             let it = g.as_ref().and_then(|g| g.items.iter().find(|x| Some(x.skill_id) == id));
             it.map_or(vec![], |it| one_region(&skill_info(it.skill_id).name, &it.distances, cv.distance))
         }
+        Tab::Cm => vec![],
         Tab::Ranking => {
             let (r, sel) = (s.r_res.cloned().filter(|r| same(&r.cv)), *s.r_sel.read());
             let x = r.as_ref().zip(sel).and_then(|(r, (card, st))| r.items.iter().find(|x| x.card_id == card && x.style == st));

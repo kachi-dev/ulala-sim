@@ -3,6 +3,7 @@
 
 mod batch;
 mod checks;
+mod cm;
 mod conditions;
 mod course;
 mod data;
@@ -22,6 +23,7 @@ mod wit;
 
 pub use batch::*;
 pub use checks::*;
+pub use cm::*;
 pub use conditions::*;
 pub use course::*;
 pub use data::*;

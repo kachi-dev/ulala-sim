@@ -1,6 +1,7 @@
 //! UI shell: app state, the split workspace, splash and toast. The rest lives in the submodules below.
 
 mod chrome;
+mod cm;
 mod gains;
 mod jobs;
 mod ranking;
@@ -53,6 +54,7 @@ enum Tab {
     Results,
     Gains,
     Ranking,
+    Cm,
 }
 
 /// Subtabs of an uma's detail in the results (a single run has only Summary and Skills).
@@ -244,6 +246,15 @@ struct S {
     g_rate: Signal<f32>,
     /// Options: share of logical processors for long jobs, percent (`cpu_pref`).
     cpu: Signal<u8>,
+    // CM tab
+    /// CM shown (champions_schedule id); 0 = all.
+    cm_sel: Signal<i32>,
+    /// Team open in the detail (`CmTeam::key`).
+    cm_team: Signal<Option<Vec<i32>>>,
+    cm_n: Signal<usize>,
+    /// Each simulated save's `RaceSim`.
+    cm_sim: Signal<HashMap<PathBuf, Arc<RaceSim>>>,
+    cm_filter: Signal<cm::RaceFilter>,
 }
 
 #[component]
@@ -320,6 +331,11 @@ pub fn App() -> Element {
         g_sel: use_signal(|| None),
         g_rate: use_signal(|| 500.0),
         cpu: use_signal(cpu_pref),
+        cm_sel: use_signal(|| 0),
+        cm_team: use_signal(|| None),
+        cm_n: use_signal(|| 100),
+        cm_sim: use_signal(HashMap::new),
+        cm_filter: use_signal(|| cm::RaceFilter::All),
     };
     use_context_provider(|| s);
     // An effect, not a hook: starting a job writes signals, which the component body must not.
@@ -387,6 +403,8 @@ fn Workspace() -> Element {
     let tab = *s.tab.read();
     let open = *s.left_open.read();
     let stale = use_stale(s, move || s.res.read().as_ref().map(|r| r.rev));
+    // Memoised: the save index fills in every 100 ms at startup.
+    let has_cm = use_memo(move || cm::has_cm(s));
     // Divider drag / double-click reset, done in the page: a Rust round trip per pointer move would lag.
     use_hook(|| {
         document::eval(SPLIT_JS);
@@ -421,11 +439,13 @@ fn Workspace() -> Element {
                     {tab_btn(Tab::Results, "Results", stale())}
                     {tab_btn(Tab::Gains, "Skill gains", false)}
                     {tab_btn(Tab::Ranking, "Uma ranking", false)}
+                    if has_cm() { {tab_btn(Tab::Cm, "CM", false)} }
                 }
                 // Always mounted: each pane keeps its scroll position and state across tab switches.
                 div { class: "pane", id: "pane-results", hidden: tab != Tab::Results, results::ResultsTab {} }
                 div { class: "pane", id: "pane-gains", hidden: tab != Tab::Gains, gains::GainsTab {} }
                 div { class: "pane", id: "pane-ranking", hidden: tab != Tab::Ranking, ranking::RankingTab {} }
+                if has_cm() { div { class: "pane", id: "pane-cm", hidden: tab != Tab::Cm, cm::CmTab {} } }
             }
         }
     }

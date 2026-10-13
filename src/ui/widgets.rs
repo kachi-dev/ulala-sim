@@ -54,7 +54,7 @@ pub(super) fn horse_icon(h: &HorseInput, ring: Option<&str>, size: &str) -> Elem
 
 /// Hue families per team (team race): the player's team gets Urara pink, others blue, green, orange; teammates get
 /// distinct shades of their team's hue so their lines stay apart.
-const TEAM_HUES: [[&str; 6]; 4] = [
+pub(super) const TEAM_HUES: [[&str; 6]; 4] = [
     ["#f0699b", "#b3245f", "#ff9ec4", "#e0457e", "#ffc2da", "#8f1c4c"],
     ["#2a78d6", "#62c3ef", "#17488f", "#8fb4ff", "#0e86ad", "#4a5fc8"],
     ["#14ac77", "#8ccf3a", "#0b6b4a", "#4fd1a5", "#5f8f1a", "#00897b"],
