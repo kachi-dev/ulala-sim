@@ -45,8 +45,13 @@ pub fn Results() -> Element {
     }
 }
 
-fn final_leg_marker(cv: &CourseView) -> Vec<(f32, String)> {
-    vec![(cv.final_leg_start / cv.distance * 100.0, "Late race".into())]
+/// Baseline change on an `EVENTS` cell: an arrow, green when the change is good for the uma; nothing below `eps`.
+fn state_arrow(was: f32, now: f32, eps: f32, more_good: bool, title: String) -> Element {
+    if (now - was).abs() < eps {
+        return rsx! {};
+    }
+    let good = (now > was) == more_good;
+    rsx! { span { class: if good { "d good" } else { "d bad" }, title: "{title}", if now > was { " ▲" } else { " ▼" } } }
 }
 
 fn who(res: &Res, names: &[String], i: usize) -> Element {

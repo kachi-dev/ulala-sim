@@ -7,7 +7,7 @@ mod field;
 mod run;
 
 use super::*;
-use crate::charts::{Bins, CourseProfile, Region};
+use crate::charts::{Band, Bins, CourseProfile, Mark, Region};
 use course::CourseCard;
 pub use drawer::{Drawer, Picker};
 use field::FieldCard;
@@ -78,8 +78,8 @@ fn one_region(name: &str, distances: &[f32], course: f32) -> Vec<Region> {
     span(distances, course).map(|(a, b, bins)| (a, b, format!("{name} (p10-p90)"), "var(--accent)".to_string(), bins)).into_iter().collect()
 }
 
-/// The course, pinned above the analysis tabs. Regions follow the tab: Results = the focused uma's activations (all
-/// in small fields), Skill gains = the open skill, Uma ranking = the open unique.
+/// The course, pinned above the analysis tabs. Regions follow the tab: Results = the focused uma's activations pinned
+/// on the course (all in small fields; single runs only), Skill gains = the open skill, Uma ranking = the open unique.
 #[component]
 pub fn TopCourse() -> Element {
     let s = use_context::<S>();
@@ -87,6 +87,8 @@ pub fn TopCourse() -> Element {
     let tab = *s.tab.read();
     let same = |c: &CourseView| c.info.id == cv.info.id;
     let mut hint = None;
+    let mut marks: Vec<Mark> = vec![];
+    let mut bands: Vec<Band> = vec![];
     let regions: Vec<Region> = match tab {
         Tab::Results => match s.res.cloned().filter(|r| same(&r.cv)) {
             // A skill open in the batch uma detail: just that skill.
@@ -96,11 +98,13 @@ pub fn TopCourse() -> Element {
                 st.map_or(vec![], |st| one_region(&skill_info(id).name, &st.distances, cv.distance))
             }
             Some(r) => {
-                let (reg, need) = regions(&r, *s.focus.read());
+                let need;
+                (marks, need) = activations(&r, *s.focus.read());
+                bands = states(&r, *s.focus.read());
                 if need {
                     hint = Some("Select an uma to see where its skills activate.");
                 }
-                reg
+                vec![]
             }
             None => vec![],
         },
@@ -128,18 +132,27 @@ pub fn TopCourse() -> Element {
                 phases: cv.phases.to_vec(),
                 final_leg_start: cv.final_leg_start,
                 regions,
+                marks,
+                bands,
             }
             if let Some(h) = hint { p { class: "muted small hint", "{h}" } }
         }
     }
 }
 
-/// At most this many regions in the pinned course (each label takes a lane; the full list is in Skill activations).
-const MAX_REGIONS: usize = 8;
+/// The focused uma's race states in a single run, a band row per state it was in.
+fn states(res: &Res, focus: Option<usize>) -> Vec<Band> {
+    let (Kind::Single { cur, .. }, Some(f)) = (&res.kind, focus) else { return vec![] };
+    cur.horses.get(f).map_or(vec![], state_bands)
+}
 
-/// Activation regions for the course preview: the focused uma, or everyone in small fields. True = too many umas to
-/// show, pick one.
-fn regions(res: &Res, focus: Option<usize>) -> (Vec<Region>, bool) {
+/// At most this many marks in the pinned course (the full list is in Skill activations).
+const MAX_MARKS: usize = 8;
+
+/// Single-run activations for the course preview: the focused uma, or everyone in small fields. True = too many
+/// umas to show, pick one. Batches show none: the uma detail's Skills chart covers it.
+fn activations(res: &Res, focus: Option<usize>) -> (Vec<Mark>, bool) {
+    let Kind::Single { cur, .. } = &res.kind else { return (vec![], false) };
     let n = res.input.horses.len();
     let who: Vec<usize> = match focus {
         Some(f) if f < n => vec![f],
@@ -148,30 +161,6 @@ fn regions(res: &Res, focus: Option<usize>) -> (Vec<Region>, bool) {
     };
     // One uma: the accent; several: their own colours, to tell them apart.
     let color = |h: usize| if who.len() == 1 { "var(--accent)".to_string() } else { res.colors[h].clone() };
-    let mut out = vec![];
-    match &res.kind {
-        Kind::Single { cur, .. } => {
-            // Activations are points; draw them as short ticks.
-            let len = res.cv.distance * 0.012;
-            for a in cur.activations.iter().filter(|a| who.contains(&a.horse) && a.distance >= 1.0).take(MAX_REGIONS) {
-                let end = (a.distance + len).min(res.cv.distance);
-                out.push((a.distance, end, skill_info(a.skill_id).name, color(a.horse), vec![]));
-            }
-        }
-        Kind::Batch { cur, .. } => {
-            let mut rated = vec![];
-            for &h in &who {
-                for st in &cur.horses[h].skills {
-                    if let Some((a, b, bins)) = span(&st.distances, res.cv.distance) {
-                        let label = format!("{} {:.0}%", skill_info(st.skill_id).name, st.rate * 100.0);
-                        rated.push((st.rate, (a, b, label, color(h), bins)));
-                    }
-                }
-            }
-            // The most frequent ones.
-            rated.sort_by(|x, y| y.0.total_cmp(&x.0));
-            out.extend(rated.into_iter().take(MAX_REGIONS).map(|x| x.1));
-        }
-    }
-    (out, false)
+    let out = cur.activations.iter().filter(|a| who.contains(&a.horse) && a.distance >= 1.0).take(MAX_MARKS);
+    (out.map(|a| (a.distance, skill_info(a.skill_id).name, color(a.horse))).collect(), false)
 }

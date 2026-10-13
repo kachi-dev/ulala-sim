@@ -8,10 +8,12 @@ use dioxus::prelude::*;
 mod course;
 mod dist;
 mod place;
+mod race;
 
 pub use course::*;
 pub use dist::*;
 pub use place::*;
+pub use race::*;
 
 // 18 hues (OKLCH L 0.55–0.66) validated with dataviz validate_palette.js on both the light cream (#fffaf3) and dark
 // plum (#1e1a2e) surfaces: adjacent-pair CVD ΔE >= 9.2, normal-vision ΔE >= 15.9. Gate order = slot order.
@@ -154,6 +156,42 @@ fn Legend(items: Vec<(String, String, bool)>) -> Element {
     }
 }
 
+/// Smooth SVG path through `p` (x monotonic, either direction): monotone cubic (Fritsch-Carlson), so it never
+/// overshoots past the points (HP stays >= 0, place >= 1). `join` continues a path (L) instead of starting one (M).
+fn curve(p: &[(f32, f32)], join: bool) -> String {
+    let Some(&(x0, y0)) = p.first() else { return String::new() };
+    let mut s = format!("{}{x0:.1},{y0:.1}", if join { 'L' } else { 'M' });
+    if p.len() < 2 {
+        return s;
+    }
+    let m: Vec<f32> = p.windows(2).map(|w| (w[1].1 - w[0].1) / (w[1].0 - w[0].0)).collect();
+    let mut t: Vec<f32> = (0..p.len())
+        .map(|i| match i {
+            0 => m[0],
+            i if i == m.len() => m[i - 1],
+            i if m[i - 1] * m[i] <= 0.0 => 0.0,
+            i => (m[i - 1] + m[i]) / 2.0,
+        })
+        .collect();
+    for (i, &mi) in m.iter().enumerate() {
+        if mi == 0.0 {
+            (t[i], t[i + 1]) = (0.0, 0.0);
+        } else {
+            let (a, b) = (t[i] / mi, t[i + 1] / mi);
+            if a * a + b * b > 9.0 {
+                let k = 3.0 / (a * a + b * b).sqrt();
+                (t[i], t[i + 1]) = (k * a * mi, k * b * mi);
+            }
+        }
+    }
+    for (i, w) in p.windows(2).enumerate() {
+        let ((xa, ya), (xb, yb)) = (w[0], w[1]);
+        let h = (xb - xa) / 3.0;
+        s += &format!("C{:.1},{:.1} {:.1},{:.1} {xb:.1},{yb:.1}", xa + h, ya + t[i] * h, xb - h, yb - t[i + 1] * h);
+    }
+    s
+}
+
 fn pts_str(v: &[(f32, f32)]) -> String {
     v.iter().map(|(x, y)| format!("{x:.1},{y:.1}")).collect::<Vec<_>>().join(" ")
 }
@@ -175,5 +213,7 @@ mod tests {
         assert_eq!(dist_ticks(1700.0, 2400.0, 700.0)[0], 1700.0);
         let e = elevation_or_slopes(&[], &[(100.0, 200.0, 2.0)], 300.0);
         assert!((e.last().unwrap() - 2.0).abs() < 1e-3); // 100 m at +2% = +2 m
+        // Flat runs stay flat: a step's control points don't bulge past either level.
+        assert_eq!(curve(&[(0.0, 5.0), (10.0, 5.0), (20.0, 0.0)], false), "M0.0,5.0C3.3,5.0 6.7,5.0 10.0,5.0C13.3,5.0 16.7,1.7 20.0,0.0");
     }
 }

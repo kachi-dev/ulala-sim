@@ -7,7 +7,8 @@ use super::{Batch, Dist, Run, dist, gap_lengths};
 pub struct RunDiff {
     pub place: (usize, usize),
     pub finish_time: (f32, f32),
-    pub spurt_start: (f32, f32),
+    pub spurt_delay: (f32, f32),
+    pub spurt_speed: (f32, f32),
     pub full_spurt: (bool, bool),
     pub hp_at_goal: (f32, f32),
     /// Skills that activated only in the baseline / only in the edited run.
@@ -34,7 +35,8 @@ pub fn diff_runs(a: &Run, b: &Run) -> Vec<RunDiff> {
             RunDiff {
                 place: (x.place, y.place),
                 finish_time: (x.finish_time, y.finish_time),
-                spurt_start: (x.spurt_start, y.spurt_start),
+                spurt_delay: (x.spurt_delay, y.spurt_delay),
+                spurt_speed: (x.spurt_speed, y.spurt_speed),
                 full_spurt: (x.full_spurt, y.full_spurt),
                 hp_at_goal: (x.hp_at_goal, y.hp_at_goal),
                 skills_lost: minus(&ia, &ib),
@@ -50,8 +52,6 @@ pub fn diff_runs(a: &Run, b: &Run) -> Vec<RunDiff> {
 pub struct BatchDiff {
     pub win_rate: (f32, f32),
     pub mean_place: (f32, f32),
-    /// Per seed (edited − baseline) finish time; negative = faster.
-    pub time_delta: Dist,
     pub full_spurt_rate: (f32, f32),
     /// Per seed edited gain in lengths (2.5 m) when the faster run finishes; + = edited ahead.
     pub lengths: Dist,
@@ -76,7 +76,6 @@ pub fn diff_batches(a: &Batch, b: &Batch) -> Vec<BatchDiff> {
                 length_deltas: l,
                 win_rate: (x.win_rate, y.win_rate),
                 mean_place: (x.place.mean, y.place.mean),
-                time_delta: dist(d),
                 full_spurt_rate: (x.full_spurt_rate, y.full_spurt_rate),
             }
         })

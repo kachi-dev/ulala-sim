@@ -1,21 +1,21 @@
 use super::*;
 
-/// Vertical bars. `bars` = (x label, fraction), labelled as percentages (0.37 → 37%).
-/// `compare` = optional second series drawn as an outline over the first (baseline vs edited).
+/// Compact vertical bars, 96 px tall, no y axis. `bars` = (x label, fraction), each labelled as a percentage
+/// (0.37 → 37%). `compare` = optional second series drawn as an outline over the first (baseline vs edited).
 #[component]
 pub fn BarChart(bars: Vec<(String, f32)>, compare: Option<Vec<f32>>, color: String) -> Element {
     let (mut size, cw) = use_width();
-    const H: f32 = 220.0;
-    const L: f32 = 40.0;
-    const R: f32 = 8.0;
-    const T: f32 = 22.0;
-    const B: f32 = 24.0;
+    const H: f32 = 96.0;
+    const L: f32 = 4.0;
+    const R: f32 = 4.0;
+    const T: f32 = 16.0;
+    const B: f32 = 18.0;
     let mut hover = use_signal(|| None::<usize>);
     let (pw, ph) = (cw - L - R, H - T - B);
     let cmp = |i: usize| compare.as_ref().and_then(|c| c.get(i).copied());
     let all = bars.iter().map(|b| b.1).chain(compare.iter().flatten().copied());
     let (lo, hi) = all.fold((0f32, 0f32), |(a, b), v| (a.min(v), b.max(v)));
-    let (lo, hi, step, ticks) = nice_domain(lo, hi, 4);
+    let (lo, hi, _, _) = nice_domain(lo, hi, 4);
     let y = move |v: f32| T + (hi - v) / (hi - lo) * ph;
     let slot = pw / bars.len().max(1) as f32;
     let bw = (slot * 0.6).min(28.0);
@@ -27,7 +27,6 @@ pub fn BarChart(bars: Vec<(String, f32)>, compare: Option<Vec<f32>>, color: Stri
 
     rsx! {
         svg { view_box: "0 0 {cw} {H}", style: SVG_STYLE, onresize: move |e| track(&mut size, e),
-            {y_grid(&ticks, y, L, cw - R, |t| fmt_tick(t, step, true))}
             if let Some(i) = hover() {
                 rect { x: L + i as f32 * slot, y: T, width: slot, height: ph, fill: "var(--grid)", fill_opacity: 0.5 }
             }
@@ -47,7 +46,7 @@ pub fn BarChart(bars: Vec<(String, f32)>, compare: Option<Vec<f32>>, color: Stri
                 }
                 if i % label_every == 0 {
                     text {
-                        x: L + (i as f32 + 0.5) * slot, y: H - 8.0, fill: "var(--muted)", font_size: 11, text_anchor: "middle",
+                        x: L + (i as f32 + 0.5) * slot, y: H - 4.0, fill: "var(--muted)", font_size: 11, text_anchor: "middle",
                         "{truncate(label, (slot * label_every as f32 / 6.5) as usize + 1)}"
                     }
                 }
@@ -183,29 +182,6 @@ pub fn DelayHist(values: Vec<f32>, on_time: f32, color: String) -> Element {
                     rect { x: x(edge(k)), y: T, width: (x(edge(k + 1)) - x(edge(k))).max(1.0), height: ph, fill: "transparent", onmouseenter: move |_| hover.set(Some(k)) }
                 }
             }
-        }
-    }
-}
-
-/// Compact horizontal box plot of a distribution: whiskers p10–p90, box p25–p75, median tick, over [lo, hi].
-/// Fills its container's width at 18 px tall; a faint zero tick is drawn when 0 is inside [lo, hi].
-#[component]
-pub fn BoxRow(p10: f32, p25: f32, p50: f32, p75: f32, p90: f32, lo: f32, hi: f32, color: String) -> Element {
-    let x = |v: f32| 2.0 + 96.0 * ((v - lo) / (hi - lo).max(1e-6)).clamp(0.0, 1.0);
-    rsx! {
-        svg { view_box: "0 0 100 18", preserve_aspect_ratio: "none", style: "display:block;width:100%;height:18px",
-            if lo < 0.0 && hi > 0.0 {
-                line { x1: x(0.0), x2: x(0.0), y1: 1, y2: 17, stroke: "var(--muted)", stroke_width: 1, vector_effect: "non-scaling-stroke" }
-            }
-            line { x1: x(p10), x2: x(p90), y1: 9, y2: 9, stroke: "var(--muted)", stroke_width: 1.5, vector_effect: "non-scaling-stroke" }
-            for v in [p10, p90] {
-                line { x1: x(v), x2: x(v), y1: 6, y2: 12, stroke: "var(--muted)", stroke_width: 1.5, vector_effect: "non-scaling-stroke" }
-            }
-            rect {
-                x: x(p25), y: 4, width: (x(p75) - x(p25)).max(0.5), height: 10, fill: "{color}", fill_opacity: 0.35,
-                stroke: "{color}", stroke_width: 1.5, vector_effect: "non-scaling-stroke"
-            }
-            line { x1: x(p50), x2: x(p50), y1: 2, y2: 16, stroke: "var(--ink)", stroke_width: 2.5, vector_effect: "non-scaling-stroke" }
         }
     }
 }

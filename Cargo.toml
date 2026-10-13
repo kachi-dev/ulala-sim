@@ -8,7 +8,7 @@ license = "MIT"
 # Bump `rev` to ship a newer sim. For local development against a sibling checkout, put in .cargo/config.toml:
 #   [patch."https://github.com/kachi-dev/uma-race-simulator"]
 #   uma_race_sim = { path = "../uma-race-simulator" }
-uma_race_sim = { git = "https://github.com/kachi-dev/uma-race-simulator", rev = "4df369b34c2064cae54d26fb0f30f4f02ce5b9f4" }
+uma_race_sim = { git = "https://github.com/kachi-dev/uma-race-simulator", rev = "cad6e6c98617c39fb34772bc5d1dd137b9422d6b" }
 dioxus = { version = "0.7", features = ["desktop"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -106,6 +106,8 @@ pub struct HorseStats {
     pub place_by_progress: Vec<Dist>,
     /// 101 entries: HP distribution at that % of the course.
     pub hp_by_progress: Vec<Dist>,
+    /// 101 entries: speed (m/s) distribution at that % of the course.
+    pub speed_by_progress: Vec<Dist>,
     /// Mean of `HorseRun::spurt_need_hp`.
     pub spurt_need_hp: f32,
     pub full_spurt_rate: f32,
@@ -123,8 +125,13 @@ pub struct HorseStats {
     pub spurt_kinds: [f32; 5],
     /// spurt_start − final-leg start (m), per seed that spurted.
     pub spurt_delays: Vec<f32>,
+    /// Means over seeds that spurted: the calc's target speed, and how far below max spurt speed it was (m/s).
+    pub spurt_speed: f32,
+    pub spurt_slow: f32,
     /// `HorseRun::hp_out_at`, per seed that ran out of HP.
     pub hp_out_distances: Vec<f32>,
+    /// Per `span_kind`: share of races with any time in that state, mean seconds in it over those races.
+    pub states: [(f32, f32); uma_race_sim::api::span_kind::COUNT],
 }
 
 #[derive(Clone)]
@@ -181,6 +188,7 @@ pub(super) fn summarize(input: &RaceInput, seeds: &[i32], runs: &[(Vec<HorseRun>
                 finish_time: dist(hr.iter().map(|x| x.finish_time).collect()),
                 place_by_progress: (0..=100).map(|p| dist(hr.iter().map(|x| x.place_by_progress[p] as f32).collect())).collect(),
                 hp_by_progress: (0..=100).map(|p| dist(hr.iter().map(|x| x.hp_by_progress[p]).collect())).collect(),
+                speed_by_progress: (0..=100).map(|p| dist(hr.iter().map(|x| x.speed_by_progress[p]).collect())).collect(),
                 spurt_need_hp: hr.iter().map(|x| x.spurt_need_hp).sum::<f32>() / k,
                 full_spurt_rate: rate(&|x| x.full_spurt),
                 hp_out_rate: rate(&|x| x.hp_out),
@@ -200,7 +208,13 @@ pub(super) fn summarize(input: &RaceInput, seeds: &[i32], runs: &[(Vec<HorseRun>
                 goal_speeds: hr.iter().map(|x| x.goal_speed).collect(),
                 spurt_kinds: std::array::from_fn(|kind| rate(&|x| x.spurt_kind as usize == kind)),
                 spurt_delays: hr.iter().filter(|x| x.spurt_kind < 4).map(|x| x.spurt_delay).collect(),
+                spurt_speed: dist(hr.iter().filter(|x| x.spurt_kind < 4).map(|x| x.spurt_speed).collect()).mean,
+                spurt_slow: dist(hr.iter().filter(|x| x.spurt_kind < 4).map(|x| (x.max_spurt_speed - x.spurt_speed).max(0.0)).collect()).mean,
                 hp_out_distances: hr.iter().filter_map(|x| x.hp_out_at).collect(),
+                states: std::array::from_fn(|kind| {
+                    let t: Vec<f32> = hr.iter().map(|x| x.state_time[kind]).filter(|&t| t > 0.0).collect();
+                    (t.len() as f32 / k, t.iter().sum::<f32>() / t.len().max(1) as f32)
+                }),
             }
         })
         .collect();

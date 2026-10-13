@@ -327,18 +327,16 @@ table.grid { border-collapse: collapse; width: 100%; }
 .grid tbody tr { cursor: pointer; }
 .grid tbody tr:hover { background: var(--hover); }
 /* Row stripes go on the first cell: Chromium paints a row's own box-shadow even inside a hidden pane. */
-.grid tr.edited { background: var(--accent-soft); }
-.grid tr.edited > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
-.grid tr.sel { background: var(--accent-2-soft); }
-.grid tr.sel > td:first-child { box-shadow: inset 3px 0 0 var(--accent-2); }
+.grid tr.sel { background: var(--accent-soft); }
+.grid tr.sel > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* A table row's details (Skill gains), opened under it. */
 .grid tr.expand, .grid tr.expand:hover { background: var(--surface-2); cursor: default; }
 .grid tr.expand > td { box-shadow: inset 3px 0 0 var(--accent-2); }
 .grid tr.expand > td { padding: 10px 14px 16px; white-space: normal; }
 .gdetail .kpis > div { background: var(--surface); }
 .grid .num { text-align: right; white-space: nowrap; }
-.grid td.ok, .grid td.good { color: var(--good); font-weight: 800; }
-.grid td.no { color: var(--bad); }
+.grid td.ok, .grid td .ok, .grid td.good { color: var(--good); font-weight: 800; }
+.grid td.no, .grid td .no { color: var(--bad); }
 .who { white-space: nowrap; }
 .who b { margin-left: 8px; }
 .gate { margin-left: 6px; font-size: 11.5px; color: var(--muted); font-weight: 700; }
@@ -377,11 +375,12 @@ table.grid { border-collapse: collapse; width: 100%; }
 .acts summary { cursor: pointer; font-weight: 700; color: var(--accent-ink); }
 .mini { display: flex; align-items: flex-end; gap: 1px; height: 26px; width: 120px; border-bottom: 1px solid var(--line); }
 .mini > div { background: var(--accent); flex: 1; min-height: 1px; border-radius: 2px 2px 0 0; opacity: .85; }
-.boxcell { min-width: 200px; }
 .boxline { display: grid; grid-template-columns: 64px 1fr 48px; align-items: center; gap: 8px; }
 .kpis { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
 .kpis > div { background: var(--surface-2); border-radius: 12px; padding: 8px 14px; min-width: 110px; }
 .kpis b { display: block; font-size: 19px; }
+.kpirow { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: flex-end; }
+.placebox { flex: 1 1 260px; min-width: 0; margin-bottom: 6px; }
 .kpis span { font-size: 11.5px; color: var(--muted); font-weight: 700; }
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 18px; align-items: start; margin-bottom: 8px; }
 
@@ -407,10 +406,13 @@ table.gains td { padding-top: 3px; padding-bottom: 3px; }
 .warn-dot { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--warn-ink); color: var(--warn-bg); font-weight: 800; font-size: 12px; cursor: help; }
 .ell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seg.small button { padding: 3px 9px; font-size: 12px; }
+.seg-label { margin-left: 6px; margin-right: -2px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.race-h { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 6px; }
+.race-h .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+.race-h .on .dot { box-shadow: 0 0 0 1.5px var(--on-accent); }
 .whobox { display: flex; align-items: center; gap: 8px; }
 .whobox b { margin-left: 0; }
 .whobox .small { font-weight: 600; }
-.off { color: var(--bad); font-weight: 700; }
 .costumes { display: flex; flex-wrap: wrap; gap: 6px; }
 .costumes button { border: 2px solid transparent; background: none; padding: 1px; border-radius: 10px; cursor: pointer; opacity: .6; }
 .costumes button:hover { opacity: .9; }
@@ -573,16 +575,13 @@ table.matrix td.never { color: var(--muted); background: repeating-linear-gradie
 .pane { container-type: inline-size; }
 .grid .small.no { color: var(--bad); }
 @container (max-width: 980px) {
-  .boxcell { min-width: 120px; }
   .grid.results th, .grid.results td { padding-left: 6px; padding-right: 6px; }
 }
 @container (max-width: 860px) {
-  .c-hist, .c-spurtfrom { display: none; }
+  .c-hist { display: none; }
 }
 @container (max-width: 700px) {
-  .boxcell svg { display: none; }
-  .boxcell { min-width: 0; }
-  /* Long headers ("Full spurt / HP out") set the column width; let them wrap so the last columns fit. */
+  /* Long headers set the column width; let them wrap so the last columns fit. */
   .grid.results th { white-space: normal; }
   .grid.results th, .grid.results td { padding-left: 4px; padding-right: 4px; }
 }
@@ -595,10 +594,6 @@ table.matrix td.never { color: var(--muted); background: repeating-linear-gradie
 .vs-h h4 { margin: 0 0 6px; }
 .vsbase .kpis > div { background: var(--surface); }
 .kpis b .d { font-size: 19px; }
-@container (max-width: 980px) {
-  .batch .boxcell svg { display: none; }
-  .batch .boxcell { min-width: 0; }
-}
 .skdetail { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
 .skdetail .kpis > div { background: var(--surface); }
 .margin { font-size: 11px; font-weight: 700; color: var(--accent-ink); }
@@ -643,7 +638,8 @@ table.matrix td.never { color: var(--muted); background: repeating-linear-gradie
 .modal.notice .btns { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* Skill outcomes: activated / wit check / can't here / conditions not met (OUTCOMES). */
-.obar { display: flex; height: 9px; min-width: 90px; border-radius: 5px; overflow: hidden; background: var(--surface-2); cursor: help; }
+.oline { height: 1lh; display: flex; align-items: center; }
+.obar { flex: 1; display: flex; height: 9px; min-width: 90px; border-radius: 5px; overflow: hidden; background: var(--surface-2); cursor: help; }
 .obar > div { min-width: 2px; }
 .obar .o0, .olegend i.o0 { background: var(--good); }
 .obar .o1, .olegend i.o1 { background: #e8ae1c; }

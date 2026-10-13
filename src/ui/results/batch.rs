@@ -2,7 +2,6 @@
 
 use super::*;
 use super::detail::horse_detail;
-use crate::charts::*;
 
 /// Inline mini histogram of finishing places.
 fn mini_hist(h: &[f32]) -> Element {
@@ -24,7 +23,6 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
     let ed = &res.ed_mask;
     let mut order: Vec<usize> = (0..n).collect();
     order.sort_by(|&a, &b| cur.horses[a].place.mean.total_cmp(&cur.horses[b].place.mean));
-    let (lo, hi) = time_scale(cur.horses.iter().chain(base.map(|b| &b.horses[..]).unwrap_or(&[])).map(|h| &h.finish_time));
     let improved = diffs.as_ref().is_some_and(|d| d.iter().zip(ed).any(|(d, &m)| m && d.win_rate.1 > d.win_rate.0 + 0.005));
     rsx! {
         section { class: "card",
@@ -41,9 +39,9 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                             th { class: "num", "Win" }
                             th { class: "num", "Avg place" }
                             th { class: "c-hist", "Places 1 to {n}" }
-                            th { "Finish time (p10-p90)" }
-                            th { class: "num", title: "Full spurt: on time from the final-leg start and at max spurt speed. HP out: ran out of stamina.", "Full spurt / HP out" }
-                            if base.is_some() { th { class: "num", title: "Paired per seed: how far ahead (+) or behind (-) the edited setup finishes, in horse lengths (2.5 m)", "Δ lengths (mean)" } }
+                            th { title: "Means over races with a spurt. Delay: metres after the final-leg start. Speed: the spurt's target speed (m/s), and how far below max spurt speed. Full spurt: on time and at max speed.", "Last spurt (mean)" }
+                            th { title: "Share of races that kept HP to the goal, mean HP at the goal; share that ran out, mean metres before the goal", "HP (mean)" }
+                            for e in EVENTS.iter() { th { class: "num", title: "{e.hint}. Share of races it happened in, mean seconds when it did.", "{e.label}" } }
                         }
                     }
                     tbody {
@@ -55,7 +53,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                                 rsx! {
                                     tr {
                                         key: "{i}",
-                                        class: if f == Some(i) { "sel" } else if ed[i] { "edited" },
+                                        class: if f == Some(i) { "sel" },
                                         onclick: move |_| if f == Some(i) { focus.set(None) } else { focus_gate(s, i, card) },
                                         td { class: "who", {who(res, names, i)} }
                                         td { class: "num",
@@ -75,32 +73,64 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                                             }
                                         }
                                         td { class: "c-hist", {mini_hist(&h.place_hist)} }
-                                        td { class: "boxcell",
-                                            BoxRow {
-                                                p10: h.finish_time.p10,
-                                                p25: h.finish_time.p25,
-                                                p50: h.finish_time.p50,
-                                                p75: h.finish_time.p75,
-                                                p90: h.finish_time.p90,
-                                                lo,
-                                                hi,
-                                                color: "var(--accent)".to_string(),
+                                        td {
+                                            div { title: "Full spurt: on time and at max speed",
+                                                b { "{pct(h.full_spurt_rate)}" }
+                                                if let Some(d) = d {
+                                                    if pct(d.full_spurt_rate.1) != pct(d.full_spurt_rate.0) {
+                                                        " "
+                                                        {delta(d.full_spurt_rate.1 - d.full_spurt_rate.0, false, format!("{:.1} pp", (d.full_spurt_rate.1 - d.full_spurt_rate.0).abs() * 100.0))}
+                                                    }
+                                                }
                                             }
-                                            span { class: "small muted", "{ft(h.finish_time.p50)}" }
-                                            if h.finish_time.p50 > hi { span { class: "small off", title: "Far behind the field; the box is clipped at the right edge", " off scale" } }
-                                        }
-                                        td { class: "num",
-                                            "{pct(h.full_spurt_rate)}"
-                                            if let Some(d) = d {
-                                                if pct(d.full_spurt_rate.1) != pct(d.full_spurt_rate.0) { div { class: "was", "was {pct(d.full_spurt_rate.0)}" } }
+                                            if h.spurt_delays.is_empty() {
+                                                span { class: "no", "No spurt" }
+                                            } else {
+                                                {
+                                                    let delay = dist(h.spurt_delays.clone()).mean;
+                                                    let slow = h.spurt_slow >= 0.005;
+                                                    rsx! {
+                                                        div { "Delay: " span { class: if delay > SPURT_ON_TIME_M { "no" } else { "ok" }, "{delay:.2}m" } }
+                                                        div {
+                                                            "Speed: "
+                                                            span { class: if slow { "no" } else { "ok" },
+                                                                "{h.spurt_speed:.2}"
+                                                                if slow { " (-{h.spurt_slow:.2})" }
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
-                                            div { class: if h.hp_out_rate > 0.0 { "small no" } else { "small muted" }, title: "Ran out of HP", "{pct(h.hp_out_rate)} out" }
                                         }
-                                        if let Some(d) = d {
-                                            td { class: "num",
-                                                {len_delta(d.lengths.mean)}
-                                                if d.time_delta.p50.abs() >= 0.0005 {
-                                                    div { class: "was", "median {d.time_delta.p50:+.3}s" }
+                                        td {
+                                            if h.hp_out_rate < 1.0 {
+                                                div { class: "ok", "Survived" if h.hp_out_rate > 0.0 { " {pct(1.0 - h.hp_out_rate)}" } }
+                                            }
+                                            if h.hp_out_rate > 0.0 {
+                                                div { class: if h.hp_out_rate < 1.0 { "small no" } else { "no" },
+                                                    "Died" if h.hp_out_rate < 1.0 { " {pct(h.hp_out_rate)}" }
+                                                    if !h.hp_out_distances.is_empty() { " (-{res.cv.distance - dist(h.hp_out_distances.clone()).mean:.0}m)" }
+                                                }
+                                            }
+                                            if h.hp_out_rate < 1.0 {
+                                                div { "{h.hp_at_goal.mean:.0} HP" }
+                                            }
+                                        }
+                                        for e in EVENTS.iter() {
+                                            {
+                                                let (kind, more_good) = (e.kind, e.more_good);
+                                                let (rate, secs) = h.states[kind as usize];
+                                                rsx! {
+                                                    td { class: "num",
+                                                        if rate > 0.0 { b { "{pct(rate)}" } } else { span { class: "muted", "-" } }
+                                                        if let Some(b) = base {
+                                                            {
+                                                                let (was, was_s) = b.horses[i].states[kind as usize];
+                                                                state_arrow(was, rate, 0.0005, more_good, format!("was {} · {was_s:.1}s", pct(was)))
+                                                            }
+                                                        }
+                                                        if rate > 0.0 { div { class: "small muted", "{secs:.1}s" } }
+                                                    }
                                                 }
                                             }
                                         }
@@ -116,16 +146,4 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
             {horse_detail(s, res, names, i, cur, base, diffs.as_ref().map(|d| &d[i]))}
         }
     }
-}
-
-/// Shared finish-time axis for the box plots: robust to a straggler (a horse far behind would squeeze every other
-/// row), so the range covers the field's p10-p90 within a few seconds of the median finisher.
-fn time_scale<'a>(ds: impl Iterator<Item = &'a Dist>) -> (f32, f32) {
-    let ds: Vec<&Dist> = ds.collect();
-    let mut mids: Vec<f32> = ds.iter().map(|d| d.p50).collect();
-    mids.sort_by(f32::total_cmp);
-    let mid = mids.get(mids.len() / 2).copied().unwrap_or(0.0);
-    let lo = ds.iter().map(|d| d.p10).fold(f32::MAX, f32::min).max(mid - 4.0);
-    let hi = ds.iter().map(|d| d.p90).fold(f32::MIN, f32::max).min(mid + 4.0);
-    (lo, hi.max(lo + 0.1))
 }

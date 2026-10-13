@@ -1,4 +1,4 @@
-use uma_race_sim::api::{Frame, HorseFrame, RaceInput, SimOutput};
+use uma_race_sim::api::{Frame, HorseFrame, RaceInput, SimOutput, span_kind};
 use uma_race_sim::sim::{defs::last_spurt_calc_result, race as sim_race, record, tick};
 
 use super::{Race, SkillCheck, SkillOutcome, checks::skill_checks};
@@ -32,6 +32,8 @@ pub struct HorseRun {
     pub place_by_progress: Vec<u8>,
     /// 0..=100 → HP when this horse reached that % of the course.
     pub hp_by_progress: Vec<f32>,
+    /// 0..=100 → speed (m/s) when this horse reached that % of the course.
+    pub speed_by_progress: Vec<f32>,
     /// HP needed at the final-leg start for a full spurt (max spurt speed to the goal).
     pub spurt_need_hp: f32,
     /// HP when this horse reached the final-leg start.
@@ -51,6 +53,10 @@ pub struct HorseRun {
     pub hp_out_at: Option<f32>,
     /// Each of its skills (input order): activated, or why not.
     pub skills: Vec<SkillCheck>,
+    /// Seconds in each `span_kind` state (duel, spot struggle, rushed, blocked, conserve power).
+    pub state_time: [f32; span_kind::COUNT],
+    /// Those states as stretches of the course: (`span_kind`, from m, to m), in start order.
+    pub spans: Vec<(u8, f32, f32)>,
 }
 
 /// One simulated race.
@@ -130,6 +136,10 @@ pub fn run_once(race: &Race, input: &RaceInput) -> Run {
             c.outcome = SkillOutcome::Activated;
         }
     }
+    let mut state_time = vec![[0f32; span_kind::COUNT]; n];
+    for s in &out.spans {
+        state_time[s.horse][s.kind as usize] += s.end - s.start;
+    }
     let horses = (0..n)
         .map(|h| {
             let res = &out.results[h];
@@ -146,6 +156,7 @@ pub fn run_once(race: &Race, input: &RaceInput) -> Run {
                 place_by_progress: (0..=100).map(|p| 1 + (0..n).filter(|&j| j != h && ahead(j, h, p)).count() as u8).collect(),
                 // At the goal: the exact final HP (the frame after it is past the finish, where HP stops dropping).
                 hp_by_progress: (0..=100).map(|p| if p == 100 { hp_at_goal } else { frame_at(frames, h, t[h][p], |f| f.hp).max(0.0) }).collect(),
+                speed_by_progress: (0..=100).map(|p| frame_at(frames, h, t[h][p], |f| f.speed)).collect(),
                 spurt_need_hp,
                 hp_at_final_leg: frame_at(frames, h, cross_time(frames, h, final_leg), |f| f.hp).max(0.0),
                 goal_speed: frame_at(frames, h, t[h][100], |f| f.speed),
@@ -155,6 +166,8 @@ pub fn run_once(race: &Race, input: &RaceInput) -> Run {
                 spurt_kind,
                 hp_out_at: if hp_out { hp_out_distance(frames, h) } else { None },
                 skills: std::mem::take(&mut checks[h]),
+                state_time: state_time[h],
+                spans: out.spans.iter().filter(|s| s.horse == h).map(|s| (s.kind, distance_at(frames, h, s.start), distance_at(frames, h, s.end))).collect(),
             }
         })
         .collect();

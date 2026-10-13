@@ -473,3 +473,71 @@ pub(super) fn delta(d: f32, lower_better: bool, txt: String) -> Element {
 pub(super) fn time_delta(d: f32) -> Element {
     delta(d, true, format!("{:.3}s {}", d.abs(), if d < 0.0 { "faster" } else { "slower" }))
 }
+
+/// A race event (`span_kind`) as the results show it.
+pub(super) struct RaceEvent {
+    pub kind: u8,
+    /// Table column.
+    pub label: &'static str,
+    /// Chart row.
+    pub short: &'static str,
+    pub hint: &'static str,
+    /// More time in it is good for the uma (table arrow colour).
+    pub more_good: bool,
+    /// Clear of the chart lines (pink place, blue speed, green HP).
+    pub color: &'static str,
+    /// 24x24 stroke path.
+    pub icon: &'static str,
+}
+
+/// The race events, in table order.
+pub(super) const EVENTS: [RaceEvent; 5] = {
+    use uma_race_sim::api::span_kind;
+    [
+        RaceEvent {
+            kind: span_kind::DUEL, label: "Duel", short: "Duel", more_good: true, color: "#ff9b3d",
+            hint: "Dueling: side by side on the final straight, pushing each other on",
+            // Crossed swords.
+            icon: "M14.5 17.5L3 6V3h3l11.5 11.5M13 19l6-6M16 16l4 4M19 21l2-2M14.5 6.5L18 3h3v3l-3.5 3.5M5 14l4 4M7 17l-3 3M3 19l2 2",
+        },
+        RaceEvent {
+            kind: span_kind::SPOT_STRUGGLE, label: "Spot struggle", short: "Struggle", more_good: true, color: "#b48cff",
+            hint: "Spot struggle: front runners fighting for the lead early on, moving them forward at an HP cost",
+            // Two arrows racing for the front, one a nose ahead.
+            icon: "M3 8h13M12 4l4 4-4 4M6 16h14M16 12l4 4-4 4",
+        },
+        RaceEvent {
+            kind: span_kind::RUSHED, label: "Rushed", short: "Rushed", more_good: false, color: "#ff5f5f",
+            hint: "Rushed: running too eagerly, burning extra HP",
+            // Flame.
+            icon: "M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.4-.5-2-1-3-1.1-2.1-.2-4 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.2.4-2.3 1-3a2.5 2.5 0 0 0 2.5 2.5z",
+        },
+        RaceEvent {
+            kind: span_kind::BLOCKED, label: "Blocked", short: "Blocked", more_good: false, color: "#9aa3b5",
+            hint: "An uma ahead in its lane caps its speed",
+            // No entry.
+            icon: "M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18M5.6 5.6l12.8 12.8",
+        },
+        RaceEvent {
+            kind: span_kind::CONSERVE_POWER, label: "Conserve power", short: "Conserve", more_good: true, color: "#f2c94c",
+            hint: "The conserve-power accel boost released at the last spurt",
+            // Lightning.
+            icon: "M13 2L3 14h9l-1 8 10-12h-9l1-8z",
+        },
+    ]
+};
+
+/// One uma's race events in a single run as chart bands, one per event it was in.
+pub(super) fn state_bands(h: &HorseRun) -> Vec<crate::charts::Band> {
+    EVENTS
+        .iter()
+        .map(|e| crate::charts::Band {
+            label: e.short.to_string(),
+            color: e.color.to_string(),
+            icon: e.icon.to_string(),
+            stretches: h.spans.iter().filter(|s| s.0 == e.kind).map(|s| (s.1, s.2)).collect(),
+            secs: h.state_time[e.kind as usize],
+        })
+        .filter(|b| !b.stretches.is_empty())
+        .collect()
+}

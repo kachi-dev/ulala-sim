@@ -4,6 +4,73 @@ use super::*;
 pub type Bins = Vec<(f32, f32, f32)>;
 /// A `CourseProfile` region: (start m, end m, label, colour, bins).
 pub type Region = (f32, f32, String, String, Bins);
+/// A `CourseProfile` mark: (at m, label, colour).
+pub type Mark = (f32, String, String);
+/// One race state of one uma along the course (e.g. rushed). `CourseProfile` draws a row each, `RaceChart` tinted
+/// regions; both with the icon.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Band {
+    pub label: String,
+    pub color: String,
+    /// 24x24 stroke path.
+    pub icon: String,
+    /// Stretches (from m, to m).
+    pub stretches: Vec<(f32, f32)>,
+    /// Seconds in it.
+    pub secs: f32,
+}
+
+/// Icon positions for `bands`: (band, x px), one per stretch's middle, sorted by x; one that would overlap the
+/// previous icon of its own band (closer than `gap` px) is dropped, so a run of short stretches gets one.
+pub(super) fn band_markers(bands: &[Band], x: impl Fn(f32) -> f32, gap: f32) -> Vec<(usize, f32)> {
+    let x = &x;
+    let mut v: Vec<(usize, f32)> =
+        bands.iter().enumerate().flat_map(|(k, b)| b.stretches.iter().map(move |&(a, e)| (k, (x(a) + x(e)) / 2.0))).collect();
+    v.sort_by(|a, b| a.1.total_cmp(&b.1));
+    let mut last = vec![f32::MIN; bands.len()];
+    v.retain(|&(k, cx)| {
+        let keep = cx - last[k] >= gap;
+        if keep {
+            last[k] = cx;
+        }
+        keep
+    });
+    v
+}
+
+/// A band's icon at (`cx`, `cy`): its glyph on a disc of its colour, radius `r`; a faded dashed ring when `ghost`
+/// (the baseline's events).
+pub(super) fn band_icon(b: &Band, cx: f32, cy: f32, r: f32, ghost: bool) -> Element {
+    let g = r * 1.27; // glyph size
+    rsx! {
+        g { opacity: if ghost { 0.7 } else { 1.0 },
+            title { "{b.label} {b.secs:.1} s" }
+            circle {
+                cx, cy, r, fill: if ghost { "var(--surface)" } else { b.color.as_str() },
+                stroke: if ghost { b.color.as_str() } else { "var(--surface)" }, stroke_width: 1.5,
+                stroke_dasharray: if ghost { "3 2" } else { "none" },
+            }
+            path {
+                d: "{b.icon}", transform: "translate({cx - g / 2.0} {cy - g / 2.0}) scale({g / 24.0})", fill: "none",
+                stroke: if ghost { b.color.as_str() } else { "#1b1420" }, stroke_width: 2.2 + (11.0 - r) * 0.1,
+                stroke_linecap: "round", stroke_linejoin: "round"
+            }
+        }
+    }
+}
+
+/// Diagonal hatch patterns `{prefix}-{k}`, one per band in its colour (the baseline's events).
+pub(super) fn band_hatches(prefix: &str, bands: &[Band]) -> Element {
+    rsx! {
+        defs {
+            for (k, b) in bands.iter().enumerate() {
+                pattern { id: "{prefix}-{k}", width: 6, height: 6, pattern_units: "userSpaceOnUse", pattern_transform: "rotate(45)",
+                    rect { width: 2, height: 6, fill: "{b.color}", fill_opacity: 0.55 }
+                }
+            }
+        }
+    }
+}
 
 /// Phase boundaries: 0, the phase starts inside the course, `d`.
 pub(super) fn phase_bounds(phases: &[f32], d: f32) -> Vec<f32> {
@@ -158,7 +225,7 @@ pub fn GainBars(
 /// The course under a distance chart from `s0` m: late race / last spurt tinted from `top` down to the corner and
 /// straight bands at `axis_y`, phase lines, distance labels below them and phase names along the bottom (`h`).
 #[allow(clippy::too_many_arguments)]
-fn course_axis(
+pub(super) fn course_axis(
     x: impl Fn(f32) -> f32, bounds: &[f32], s0: f32, top: f32, axis_y: f32, h: f32, right: f32, corners: &[(f32, f32)],
     straights: &[(f32, f32)], ticks: &[f32],
 ) -> Element {
@@ -277,17 +344,20 @@ pub(super) fn elevation_or_slopes(elevation: &[f32], slopes: &[(f32, f32, f32)],
 
 /// Side-view course preview (umalator-style course chart). x = 0..`distance` m.
 /// - `elevation`: height in m, evenly spaced start..goal (~5 m apart); drawn as a filled silhouette with the vertical
-///   scale exaggerated (factor shown on the left). Empty = derived from `slopes`.
+///   scale exaggerated. Empty = derived from `slopes`.
 /// - `corners`, `straights`: (start m, end m); corners numbered, the last straight labelled as the final straight.
 /// - `slopes`: (start m, end m, grade %), + = uphill; tinted on the silhouette ridge and labelled.
 /// - `phases`: start m of Early race, Mid race, Late race, Last spurt (a leading 0 is optional).
 /// - `regions`: (start m, end m, label, colour, bins) packed into lanes above the track: a bar, or with `bins`
 ///   ((from m, to m, 0..1) along it) a little histogram of where it activates.
+/// - `marks`: (at m, label, colour) pinned on the elevation ridge, labels packed into rows in the elevation band.
+/// - `bands`: one row each under the layout band, a bar per stretch (e.g. when an uma was rushed); the chart grows.
 /// Final leg (from `final_leg_start`) is pink. Hover shows metres, phase, corner/straight, grade and regions there.
 #[component]
 pub fn CourseProfile(
     distance: f32, elevation: Vec<f32>, corners: Vec<(f32, f32)>, straights: Vec<(f32, f32)>,
     slopes: Vec<(f32, f32, f32)>, phases: Vec<f32>, final_leg_start: f32, regions: Vec<Region>,
+    marks: Vec<Mark>, bands: Vec<Band>,
 ) -> Element {
     let (mut size, cw) = use_width();
     let mut hover = use_signal(|| None::<f32>);
@@ -317,12 +387,15 @@ pub fn CourseProfile(
     let ph_y = rg_y + lane_end.len() as f32 * LANE + 4.0;
     let (el_y, el_b) = (ph_y + 24.0, ph_y + 24.0 + EH);
     let lay_y = el_b + 4.0;
-    let h = lay_y + 18.0 + 24.0;
+    const BAND: f32 = 18.0;
+    let band_y = lay_y + 22.0;
+    // Bottom of the plotted rows: the layout band, or the last band row.
+    let bot = if bands.is_empty() { lay_y + 18.0 } else { band_y + bands.len() as f32 * BAND - 4.0 };
+    let h = bot + 24.0;
 
     let elev = elevation_or_slopes(&elevation, &slopes, dist);
     let (emin, emax) = elev.iter().fold((f32::MAX, f32::MIN), |(a, b), &e| (a.min(e), b.max(e)));
     let vs = EH * 0.7 / (emax - emin).max(1.0); // px per metre of height; >= 1 m range so flat courses stay flat
-    let exaggeration = vs / (pw / dist);
     let ey = move |e: f32| el_b - 8.0 - (e - emin) * vs;
     let ne = elev.len() - 1;
     let e_at = |d: f32| {
@@ -344,6 +417,26 @@ pub fn CourseProfile(
     };
     let (full_area, final_area, full_ridge) = (area(0.0, dist), area(final_leg_start, dist), pts_str(&ridge(0.0, dist)));
     let slope_ridges: Vec<(String, f32, f32, f32)> = slopes.iter().map(|&(a, b, g)| (pts_str(&ridge(a, b)), a, b, g)).collect();
+    let slope_label_y = |a: f32, b: f32| ey(e_at((a + b) / 2.0).max(e_at(a)).max(e_at(b))) - 7.0;
+    // Marks packed by distance into rows from the top of the elevation band, around each other and the slope labels.
+    let row_y = |k: usize| el_y + k as f32 * 13.0 + 10.0;
+    let slope_boxes: Vec<(f32, f32, f32)> = slopes.iter().filter(|s| x(s.1) - x(s.0) > 14.0).map(|&(a, b, g)| {
+        let (c, w) = ((x(a) + x(b)) / 2.0, format!("{g:+.1}%").len() as f32 * 3.4);
+        (c - w, c + w, slope_label_y(a, b))
+    }).collect();
+    let mut row_end: Vec<f32> = vec![];
+    let mut rows = vec![(0usize, 0f32); marks.len()]; // (row, label x)
+    let mut order: Vec<usize> = (0..marks.len()).collect();
+    order.sort_by(|&a, &b| marks[a].0.total_cmp(&marks[b].0));
+    for &i in &order {
+        let lw = marks[i].1.chars().count() as f32 * 6.8;
+        let lx = (x(marks[i].0) + 3.0).min(cw - R - lw);
+        let free = |k: usize, e: f32| e <= lx && !slope_boxes.iter().any(|&(l, r, y)| l < lx + lw && r > lx && (y - row_y(k)).abs() < 12.0);
+        let k = (0..).find(|&k| free(k, row_end.get(k).copied().unwrap_or(0.0))).unwrap();
+        row_end.resize(row_end.len().max(k + 1), 0.0);
+        row_end[k] = lx + lw + 8.0;
+        rows[i] = (k, lx);
+    }
 
     let bounds = phase_bounds(&phases, dist);
     let final_straight = straights.iter().enumerate().max_by(|a, b| a.1.1.total_cmp(&b.1.1)).map(|(i, _)| i);
@@ -361,13 +454,15 @@ pub fn CourseProfile(
         });
         parts.push(format!("elevation {:+.1} m", e_at(d) - emin));
         parts.extend(regions.iter().filter(|r| (r.0..=r.1).contains(&d)).map(|r| r.2.clone()));
+        parts.extend(marks.iter().filter(|m| (m.0 - d).abs() <= dist * 0.006).map(|m| m.1.clone()));
+        parts.extend(bands.iter().filter(|b| b.stretches.iter().any(|s| (s.0..=s.1).contains(&d))).map(|b| b.label.clone()));
         parts.join(" · ")
     });
 
     rsx! {
         svg { view_box: "0 0 {cw} {h}", style: SVG_STYLE, onresize: move |e| track(&mut size, e),
             for &t in ticks.iter() {
-                line { x1: x(t), x2: x(t), y1: el_y, y2: lay_y + 18.0, stroke: "var(--grid)", stroke_width: 1 }
+                line { x1: x(t), x2: x(t), y1: el_y, y2: bot, stroke: "var(--grid)", stroke_width: 1 }
             }
             {x_labels(&ticks, x, h - 7.0, cw - R - 24.0, |t| format!("{t} m"))}
             // Regions (activation bars) above the track.
@@ -396,7 +491,7 @@ pub fn CourseProfile(
                     text { x: (x(w[0]) + x(w[1])) / 2.0, y: ph_y + 9.0, fill: "var(--ink)", font_size: 11, text_anchor: "middle", dominant_baseline: "central", "{PHASES[i.min(3)]}" }
                 }
                 if i > 0 {
-                    line { x1: x(w[0]), x2: x(w[0]), y1: ph_y, y2: lay_y + 18.0, stroke: "var(--muted)", stroke_width: 1, stroke_dasharray: "3 3" }
+                    line { x1: x(w[0]), x2: x(w[0]), y1: ph_y, y2: bot, stroke: "var(--muted)", stroke_width: 1, stroke_dasharray: "3 3" }
                 }
             }
             // Elevation silhouette; final leg in pink, slopes tinted on the ridge.
@@ -407,15 +502,19 @@ pub fn CourseProfile(
                 polyline { points: "{pts}", fill: "none", stroke: if *g > 0.0 { "var(--bad)" } else { "var(--good)" }, stroke_width: 3, stroke_linecap: "round", stroke_linejoin: "round" }
                 if x(*b) - x(*a) > 14.0 {
                     text {
-                        x: (x(*a) + x(*b)) / 2.0, y: ey(e_at((a + b) / 2.0).max(e_at(*a)).max(e_at(*b))) - 7.0, fill: "var(--ink)", font_size: 11,
+                        x: (x(*a) + x(*b)) / 2.0, y: slope_label_y(*a, *b), fill: "var(--ink)", font_size: 11,
                         text_anchor: "middle", stroke: "var(--surface)", stroke_width: 3, paint_order: "stroke", "{g:+.1}%"
                     }
                 }
             }
-            g {
-                title { "Heights are drawn {exaggeration:.0} times steeper than distances, so slopes are visible" }
-                text { x: L - 8.0, y: el_y + EH / 2.0 - 7.0, fill: "var(--muted)", font_size: 11, text_anchor: "end", "Elevation" }
-                text { x: L - 8.0, y: el_y + EH / 2.0 + 8.0, fill: "var(--muted)", font_size: 11, text_anchor: "end", if emax - emin < 0.3 { "(flat)" } else { "(×{exaggeration:.0})" } }
+            // Marks: a stem from the label row down to a dot on the ridge.
+            for (i, (at, label, c)) in marks.iter().enumerate() {
+                line { x1: x(*at), x2: x(*at), y1: row_y(rows[i].0) - 8.0, y2: ey(e_at(*at)), stroke: "{c}", stroke_width: 1, stroke_opacity: 0.7 }
+                circle { cx: x(*at), cy: ey(e_at(*at)), r: 3.5, fill: "{c}", stroke: "var(--surface)", stroke_width: 1.5 }
+                text {
+                    x: rows[i].1, y: row_y(rows[i].0), fill: "var(--ink)", font_size: 11,
+                    stroke: "var(--surface)", stroke_width: 3, paint_order: "stroke", "{label}"
+                }
             }
             // Straights / corners band.
             text { x: L - 8.0, y: lay_y + 9.0, fill: "var(--muted)", font_size: 11, text_anchor: "end", dominant_baseline: "central", "Layout" }
@@ -436,15 +535,25 @@ pub fn CourseProfile(
                     text { x: (x(a) + x(b)) / 2.0, y: lay_y + 9.0, fill: "var(--ink)", font_size: 11, text_anchor: "middle", dominant_baseline: "central", "C{i + 1}" }
                 }
             }
+            // Bands: a row each, label on the left, a bar per stretch with the band's icon in its middle.
+            for (k, b) in bands.iter().enumerate() {
+                text { x: L - 8.0, y: band_y + k as f32 * BAND + 7.0, fill: "var(--muted)", font_size: 11, text_anchor: "end", dominant_baseline: "central", "{b.label}" }
+                for &(a, e) in b.stretches.iter() {
+                    rect { x: x(a), y: band_y + k as f32 * BAND + 4.0, width: (x(e) - x(a)).max(2.0), height: 6, rx: 3, fill: "{b.color}" }
+                }
+            }
+            for (k, cx) in band_markers(&bands, x, 16.0) {
+                {band_icon(&bands[k], cx, band_y + k as f32 * BAND + 7.0, 7.0, false)}
+            }
             if let Some(d) = hover() {
-                line { x1: x(d), x2: x(d), y1: rg_y, y2: lay_y + 18.0, stroke: "var(--ink)", stroke_width: 1, stroke_opacity: 0.6 }
+                line { x1: x(d), x2: x(d), y1: rg_y, y2: bot, stroke: "var(--ink)", stroke_width: 1, stroke_opacity: 0.6 }
                 circle { cx: x(d), cy: ey(e_at(d)), r: 4, fill: "var(--ink)", stroke: "var(--surface)", stroke_width: 2 }
             }
             if let Some(s) = read { {readout(cw - R, 12.0, s)} }
             g { onmouseleave: move |_| hover.set(None),
                 for i in 0..(pw / 4.0) as usize {
                     rect {
-                        x: L + i as f32 * 4.0, y: rg_y, width: 4, height: lay_y + 18.0 - rg_y, fill: "transparent",
+                        x: L + i as f32 * 4.0, y: rg_y, width: 4, height: bot - rg_y, fill: "transparent",
                         onmouseenter: move |_| hover.set(Some((i as f32 * 4.0 + 2.0) / pw * dist))
                     }
                 }

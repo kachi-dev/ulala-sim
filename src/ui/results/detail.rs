@@ -3,17 +3,22 @@
 use super::*;
 use crate::charts::*;
 
-fn place_series(name: &str, color: &str, h: &HorseStats, label: &str, dashed: bool) -> PlaceSeries {
-    let col = |g: fn(&Dist) -> f32| h.place_by_progress.iter().map(g).collect::<Vec<f32>>();
-    PlaceSeries {
-        label: format!("{name} ({label})"),
-        color: color.to_string(),
-        line: col(|d| d.mean),
-        inner: (!dashed).then(|| (col(|d| d.p25), col(|d| d.p75))),
-        outer: (!dashed).then(|| (col(|d| d.p10), col(|d| d.p90))),
-        dashed,
-        highlight: !dashed,
-    }
+/// Percentile `p` (10..=90) of `d`, linear between its stored p10 / p25 / p50 / p75 / p90.
+// ponytail: interpolated in-between percentiles for the fan's inner layers; store more in Dist if they look off.
+fn pctl(d: &Dist, p: f32) -> f32 {
+    let k = [(10.0, d.p10), (25.0, d.p25), (50.0, d.p50), (75.0, d.p75), (90.0, d.p90)];
+    let i = k.windows(2).position(|w| p <= w[1].0).unwrap_or(3);
+    let ((p0, v0), (p1, v1)) = (k[i], k[i + 1]);
+    v0 + (v1 - v0) * (p.clamp(p0, p1) - p0) / (p1 - p0)
+}
+
+/// Means over the course, with a p10-p90 fan (p10-p90, p20-p80, p30-p70, p40-p60).
+fn race_traces(h: &HorseStats) -> RaceTraces {
+    let t = |v: &[Dist]| Trace {
+        line: v.iter().map(|d| d.mean).collect(),
+        fan: [10.0, 20.0, 30.0, 40.0].map(|p| (v.iter().map(|d| pctl(d, p)).collect(), v.iter().map(|d| pctl(d, 100.0 - p)).collect())).to_vec(),
+    };
+    RaceTraces { place: t(&h.place_by_progress), speed: t(&h.speed_by_progress), hp: t(&h.hp_by_progress) }
 }
 
 pub(super) fn horse_detail(
@@ -34,11 +39,6 @@ pub(super) fn horse_detail(
     let n = cur.horses.len();
     let cv = &res.cv;
 
-    let mut series = vec![];
-    if let Some(b) = b {
-        series.push(place_series(&names[i], &color, b, "baseline", true));
-    }
-    series.push(place_series(&names[i], &color, h, if b.is_some() { "edited" } else { "mean, p25-p75, p10-p90" }, false));
     let bars: Vec<(String, f32)> = h.place_hist.iter().enumerate().map(|(k, v)| ((k + 1).to_string(), *v)).collect();
     let compare = b.map(|b| b.place_hist.clone());
 
@@ -71,27 +71,33 @@ pub(super) fn horse_detail(
                 UmaLinks { i, card: res.input.horses[i].card_id }
                 button { class: "btn icon", title: "Close", onclick: move |_| focus.set(None), {icon("x")} }
             }
-            div { class: "kpis",
-                div { b { "{pct(h.win_rate)}" } span { "win" } }
-                div { b { "{h.place.mean:.2}" } span { "avg place" } }
-                div { b { "{ft(h.finish_time.p50)}" } span { "median time" } }
-                div { b { "{pct(h.full_spurt_rate)}" } span { "full spurt" } }
-                div { b { "{pct(h.hp_out_rate)}" } span { "ran out of HP" } }
+            div { class: "kpirow",
+                div { class: "kpis",
+                    div { b { "{pct(h.win_rate)}" } span { "win" } }
+                    div { b { "{h.place.mean:.2}" } span { "avg place" } }
+                    div { b { "{ft(h.finish_time.p50)}" } span { "median time" } }
+                    div { b { "{pct(h.full_spurt_rate)}" } span { "full spurt" } }
+                    div { b { "{pct(h.hp_out_rate)}" } span { "ran out of HP" } }
+                }
+                if n > 1 {
+                    div { class: "placebox",
+                        span { class: "muted small", "Finishing place" if b.is_some() { " (outline: baseline)" } }
+                        BarChart { bars, compare, color: color.clone() }
+                    }
+                }
             }
             if let Some(d) = diff {
                 {vs_baseline(d, res.ed_mask.get(i) == Some(&true), &color)}
             }
-            if n > 1 {
-                div { class: "cols",
-                    div {
-                        h4 { "Position over the course" }
-                        PlaceChart { series, field_size: n, markers: final_leg_marker(cv) }
-                    }
-                    div {
-                        h4 { "Finishing place" if b.is_some() { span { class: "muted small", " (outline: baseline)" } } }
-                        BarChart { bars, compare, color: color.clone() }
-                    }
-                }
+            h4 { "Over the course" span { class: "muted small", " (mean, shaded p10 to p90)" } }
+            RaceChart {
+                cur: race_traces(h),
+                base: b.map(race_traces),
+                field_size: n,
+                course_distance: cv.distance,
+                phases: cv.phases.to_vec(),
+                corners: cv.corner_spans(),
+                straights: cv.straights.iter().map(|c| (c.start, c.end)).collect::<Vec<_>>(),
             }
             {spurt_and_hp(h, cv, &color)}
             h4 { "Skills" }
@@ -129,7 +135,10 @@ pub(super) fn horse_detail(
                                                 if pct(rate(b, id)) != pct(r) { div { class: "was", "was {pct(rate(b, id))}" } }
                                             }
                                         }
-                                        td { if let Some(o) = outcomes(id) { {outcome_bar(&o)} } }
+                                        td {
+                                            if let Some(o) = outcomes(id) { div { class: "oline", {outcome_bar(&o)} } }
+                                            if b.is_some_and(|b| pct(rate(b, id)) != pct(r)) { div { class: "was", visibility: "hidden", "was" } }
+                                        }
                                     }
                                 }
                             }
