@@ -19,6 +19,7 @@ fn install(mut s: S, (race, all, courses, cv): Loaded) {
     s.input.set(race.input.clone());
     s.trainers.set(race.trainers.clone());
     s.baseline.set(race.path.is_some().then(|| Arc::new(race.input.clone())));
+    s.field_size.set(if race.path.is_some() { race.input.horses.len().clamp(FIELD_MIN, MAX_FIELD) } else { FIELD_MIN });
     *s.rev.write() += 1;
     s.verify.set(None);
     s.res.set(None);
@@ -58,13 +59,15 @@ pub(super) fn restore(s: S) {
                 let cv = Arc::new(course_view(&r.race, r.input.course_set_id));
                 // A save's server check isn't stored: run its seed again, as opening it does.
                 let v = r.race.path.is_some().then(|| verify_against_server(&r.race, &run_once(&r.race, &r.race.input)));
-                (prepare(r.race), r.input, r.trainers, r.baseline, cv, v)
+                (prepare(r.race), r.input, r.trainers, r.baseline, r.field_size, cv, v)
             })
         })
         .await;
-        let Ok((Some((l, input, trainers, baseline, cv, v)), _)) = r else { return new_custom(s) };
+        let Ok((Some((l, input, trainers, baseline, field_size, cv, v)), _)) = r else { return new_custom(s) };
         install(s, l);
         s.verify.set(v);
+        let fs = if field_size > 0 { field_size } else { *s.field_size.peek() }.max(input.horses.len()).min(MAX_FIELD);
+        s.field_size.set(fs);
         s.input.set(input);
         s.trainers.set(trainers);
         s.baseline.set(baseline.map(Arc::new));

@@ -192,8 +192,7 @@ pub(super) fn SavesModal() -> Element {
             }
             div { class: "races-sub muted small",
                 if total > LIST_CAP { "Newest {LIST_CAP} of {thousands(total)} saves" } else { "{total} saves" }
-                " in {saved_races_dir().display()}. Drop a race file anywhere to open it."
-                if indexed < saves.len() { " Reading courses: {thousands(indexed)} of {thousands(saves.len())}…" }
+                if indexed < saves.len() { " · reading courses: {thousands(indexed)} of {thousands(saves.len())}…" }
             }
             SetupHint { heading: false }
             if total == 0 {

@@ -96,7 +96,7 @@ pub(super) fn uma_colors(input: &RaceInput, player: Option<usize>) -> Vec<String
 }
 
 /// "Your team" / "Team 2" and the team's main colour, when the field has teams.
-fn team_tag(input: &RaceInput, player: Option<usize>, i: usize) -> Option<(String, &'static str)> {
+pub(super) fn team_tag(input: &RaceInput, player: Option<usize>, i: usize) -> Option<(String, &'static str)> {
     let ts = teams(input, player);
     let t = input.horses.get(i)?.team_id;
     let k = ts.iter().position(|&x| x == t)?;
@@ -327,10 +327,13 @@ pub(super) fn who_sel(s: S) -> Element {
 pub(super) fn mode_seg(s: S, mut sel: Signal<Option<bool>>, field: usize) -> (Element, bool, usize) {
     let mut lobby = s.npc_lobby;
     let npc = sel.read().unwrap_or(field <= 1);
-    let size = if npc { FIELD_MIN } else { field.max(FIELD_MIN) };
+    let want = *s.field_size.read();
+    let size = if npc { want } else { field.max(want) };
     let li = *lobby.read();
-    let (name, mix) = LOBBIES[li.min(LOBBIES.len() - 1)];
-    let mix = LOBBY_STYLES.iter().zip(mix).filter(|x| x.1 > 0).map(|(l, k)| format!("{k} {l}")).collect::<Vec<_>>().join(", ");
+    let name = LOBBIES[li.min(LOBBIES.len() - 1)].0;
+    let styles = lobby_styles(li, size - if npc { 1 } else { field });
+    let mix = (0..LOBBY_STYLES.len()).map(|k| (LOBBY_STYLES[k], styles.iter().filter(|&&x| x == k).count()));
+    let mix = mix.filter(|x| x.1 > 0).map(|(l, k)| format!("{k} {l}")).collect::<Vec<_>>().join(", ");
     let el = rsx! {
         div { class: "field",
             span { "Run" }

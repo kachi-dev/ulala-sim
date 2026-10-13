@@ -200,6 +200,22 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
 .conds select { min-width: 190px; }
 .seedbox input { width: 130px; }
 .seedbox { display: flex; gap: 4px; align-items: center; }
+.fsize { display: flex; align-items: center; gap: 8px; }
+/* Field size: a ticked slider with the value on its thumb (thumb 20px: its center runs from 10px to 100% - 10px). */
+.fs-slider { position: relative; width: 140px; height: 20px; }
+.fs-slider input { -webkit-appearance: none; appearance: none; position: relative; width: 100%; height: 20px; margin: 0; padding: 0; border: 0; background: none; box-shadow: none; cursor: pointer; }
+.fs-slider input::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px;
+  background: linear-gradient(to right, var(--accent) calc(10px + (100% - 20px) * var(--f)), var(--line) 0);
+}
+.fs-slider input::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; margin-top: -8px; border-radius: 50%; background: var(--accent); }
+.fs-slider input:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+.fs-ticks { position: absolute; left: 10px; right: 10px; top: 5px; height: 10px; display: flex; justify-content: space-between; pointer-events: none; }
+.fs-ticks i { width: 1px; background: var(--line); }
+.fs-slider b {
+  position: absolute; top: 0; left: calc(10px + (100% - 20px) * var(--f)); transform: translateX(-50%);
+  width: 20px; line-height: 20px; text-align: center; font-size: 11px; color: var(--on-accent); pointer-events: none;
+}
 
 
 /* ---------- avatars & skill rows ---------- */
@@ -255,9 +271,15 @@ td.skills > .skr + .skr { margin-top: 3px; }
 .uma-tags span { font-size: 12px; font-weight: 700; background: var(--surface); padding: 2px 8px; border-radius: 8px; color: var(--sub-ink); }
 .uma-tags b { color: var(--accent-ink); }
 .uma-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
-.uma-stats div { background: var(--surface); border-radius: 8px; padding: 4px 6px; text-align: center; }
+.uma-stats label { display: block; background: var(--surface); border-radius: 8px; padding: 4px 6px; text-align: center; cursor: text; }
 .uma-stats span { display: block; font-size: 10.5px; text-transform: uppercase; color: var(--muted); font-weight: 800; }
-.uma-stats b { font-size: 15px; }
+.uma-stats input {
+  width: 100%; min-width: 0; padding: 0; border: 0; border-radius: 4px; background: none; box-shadow: none;
+  color: inherit; font: inherit; font-size: 15px; font-weight: 800; text-align: center; -moz-appearance: textfield;
+}
+.uma-stats input::-webkit-inner-spin-button, .uma-stats input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.uma-stats input:hover { background: var(--hover); }
+.uma-stats input:focus { background: var(--bg); box-shadow: 0 0 0 2px var(--accent); }
 .uma-stats .chg { background: var(--accent-soft); color: var(--accent-ink); }
 .more { font-size: 12px; font-weight: 700; color: var(--muted); align-self: center; padding-left: 6px; }
 .uma.add { flex-direction: row; align-items: center; justify-content: center; gap: 8px; border: 2px dashed var(--line); background: transparent; color: var(--muted); font-weight: 800; font-size: 15px; }
@@ -442,11 +464,11 @@ table.gains td { padding-top: 3px; padding-bottom: 3px; }
 .umarow .uma-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .umarow .uma-tags { flex-wrap: nowrap; }
 .uma-tags span { white-space: nowrap; }
-.umarow .uma-stats div { min-width: 0; }
+.umarow .uma-stats label { min-width: 0; }
 /* Mood is in the editor; the row keeps the aptitudes. */
 .umarow .uma-tags span:last-child { display: none; }
-.umarow .uma-stats div { padding: 2px 4px; }
-.umarow .uma-stats b { font-size: 13.5px; }
+.umarow .uma-stats label { padding: 2px 0; }
+.umarow .uma-stats input { font-size: 13.5px; }
 .umarow .uma-sk { display: flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; }
 .umarow .uma-sk .skr { min-width: 0; flex: 1; }
 .umarow .uma-act .btn.icon { padding: 2px 5px; }
@@ -534,7 +556,7 @@ table.gains td { padding-top: 3px; padding-bottom: 3px; }
 @container (max-width: 620px) {
   .umarow { grid-template-columns: 20px 36px minmax(0, 1fr) 200px auto; gap: 6px; }
   .umarow .uma-stats span { font-size: 9.5px; }
-  .umarow .uma-stats b { font-size: 12.5px; }
+  .umarow .uma-stats input { font-size: 12.5px; }
   .umarow .uma-sk { display: none; }
 }
 .saves td.num, .saves td:last-child, .saves .cat { white-space: nowrap; }
@@ -543,7 +565,7 @@ table.gains td { padding-top: 3px; padding-bottom: 3px; }
 .modal.races { width: min(1100px, 92vw); height: 80vh; }
 .modal.races .drawer-h { flex-wrap: wrap; }
 .modal.races .drawer-h input { flex: 1 1 220px; }
-.races-sub { padding: 8px 18px 0; }
+.races-sub { padding: 8px 18px 0; text-align: right; }
 .races-empty { padding: 0 18px; }
 .races-list { flex: 1; min-height: 0; overflow: auto; padding: 6px 12px 14px; }
 .empty-res h3 { margin-bottom: 6px; }
@@ -629,6 +651,19 @@ table.matrix td.never { color: var(--muted); background: repeating-linear-gradie
 .small.no { color: var(--bad); }
 .row2.fit { display: flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; overflow: hidden; }
 .row2.fit > .team { flex: none; margin-left: 0; }
+/* The field's team pill opens a menu (a popover anchored under it). */
+.team.pick { display: inline-flex; align-items: center; gap: 2px; font-family: inherit; line-height: inherit; padding: 1px 3px 1px 7px; border: 0; background: none; cursor: pointer; }
+.team.pick .ico { width: 1.15em; height: 1.15em; stroke-width: 2.8; }
+.team.pick:hover, .team.pick:focus-visible { background: color-mix(in srgb, var(--team) 20%, transparent); outline: none; }
+.team-menu {
+  inset: auto; top: anchor(bottom); left: anchor(left); position-try-fallbacks: flip-block;
+  margin: 4px 0; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow);
+}
+.team-menu:popover-open { display: grid; gap: 2px; }
+.team-menu button { display: flex; padding: 5px 8px; border: 0; border-radius: 7px; background: none; cursor: pointer; }
+.team-menu button:hover { background: color-mix(in srgb, var(--team) 22%, transparent); }
+.team-menu button.on { box-shadow: inset 0 0 0 1.5px var(--line); }
+.team-menu .team { margin: 0; }
 .row2.fit > .costume, .row2.fit > .trainer { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .row2.fit > .costume { flex: 0 1000 auto; }
 .row2.fit > .trainer { flex: 0 1 auto; }

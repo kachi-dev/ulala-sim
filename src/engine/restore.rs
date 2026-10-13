@@ -1,5 +1,5 @@
 //! What survives a restart, in `%LOCALAPPDATA%/ulala/`: the window bounds (window.json) and the race being worked on
-//! (session.json): its save (None = custom), the setup, trainer names and the pinned baseline.
+//! (session.json): its save (None = custom), the setup, field size, trainer names and the pinned baseline.
 
 use std::path::{Path, PathBuf};
 
@@ -35,6 +35,8 @@ pub struct Restored {
     pub input: RaceInput,
     pub trainers: Vec<String>,
     pub baseline: Option<RaceInput>,
+    /// 0 in files from before it was kept.
+    pub field_size: usize,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -44,10 +46,17 @@ struct Session {
     input: Input,
     trainers: Vec<String>,
     baseline: Option<Input>,
+    field_size: usize,
 }
 
-pub fn save_session(save: Option<&Path>, input: &RaceInput, trainers: &[String], baseline: Option<&RaceInput>) {
-    let s = Session { save: save.map(Path::to_path_buf), input: input.into(), trainers: trainers.to_vec(), baseline: baseline.map(Input::from) };
+pub fn save_session(save: Option<&Path>, input: &RaceInput, trainers: &[String], baseline: Option<&RaceInput>, field_size: usize) {
+    let s = Session {
+        save: save.map(Path::to_path_buf),
+        input: input.into(),
+        trainers: trainers.to_vec(),
+        baseline: baseline.map(Input::from),
+        field_size,
+    };
     write("session.json", &s);
 }
 
@@ -65,7 +74,7 @@ pub fn restore_session() -> Option<Restored> {
     }
     let mut trainers = s.trainers;
     trainers.resize(input.horses.len(), String::new());
-    Some(Restored { race, input, trainers, baseline: s.baseline.map(RaceInput::from) })
+    Some(Restored { race, input, trainers, baseline: s.baseline.map(RaceInput::from), field_size: s.field_size })
 }
 
 fn read<T: for<'a> Deserialize<'a>>(name: &str) -> Option<T> {

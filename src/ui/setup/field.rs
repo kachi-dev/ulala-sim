@@ -19,6 +19,50 @@ fn duplicate_horse(mut s: S, i: usize) {
     s.focus.set(None);
 }
 
+/// Uma `i`'s team as a pill that opens a menu of the teams, each in the colour it would get (muted while the field
+/// would have under two teams). A popover: it escapes the row's clipping and closes on a click outside or Esc.
+fn team_pick(s: S, input: &RaceInput, player: Option<usize>, i: usize) -> Element {
+    let cur = input.horses[i].team_id;
+    let choice = |v: i32| {
+        let mut t = input.clone();
+        t.horses[i].team_id = v;
+        let tag = team_tag(&t, player, i);
+        let color = tag.as_ref().map_or("var(--muted)", |x| x.1);
+        (v, tag.map_or_else(|| if v == 0 { "No team".to_string() } else { format!("Team {v}") }, |x| x.0), color)
+    };
+    let (_, label, color) = choice(cur);
+    let opts: Vec<_> = (0..=3).map(choice).collect();
+    rsx! {
+        button {
+            class: "team pick",
+            style: "--team: {color}; anchor-name: --tm{i}",
+            "popovertarget": "tm-{i}",
+            onclick: |e| e.stop_propagation(),
+            ondoubleclick: |e| e.stop_propagation(),
+            "{label}"
+            {icon("down")}
+        }
+        div {
+            id: "tm-{i}",
+            class: "team-menu",
+            style: "position-anchor: --tm{i}",
+            "popover": "auto",
+            onclick: |e| e.stop_propagation(),
+            ondoubleclick: |e| e.stop_propagation(),
+            for (v, l, c) in opts {
+                button {
+                    class: if v == cur { "on" },
+                    style: "--team: {c}",
+                    "popovertarget": "tm-{i}",
+                    "popovertargetaction": "hide",
+                    onclick: move |_| edit(s, i, |h| h.team_id = v),
+                    span { class: "team", "{l}" }
+                }
+            }
+        }
+    }
+}
+
 fn remove_horse(mut s: S, i: usize) {
     if *s.sel.peek() > i {
         *s.sel.write() -= 1;
@@ -49,7 +93,7 @@ fn uma_actions(mut s: S, i: usize, n: usize) -> Element {
             button {
                 class: "btn icon",
                 title: "Duplicate",
-                disabled: n >= MAX_FIELD,
+                disabled: n >= *s.field_size.read(),
                 onclick: move |e| {
                     e.stop_propagation();
                     duplicate_horse(s, i);
@@ -98,9 +142,24 @@ pub(super) fn FieldCard() -> Element {
         let sub = if trainer.is_empty() { title.clone() } else { format!("{title} · {trainer}") };
         let stat_cells = rsx! {
             for k in 0..5 {
-                div { class: if hs[k] != bs[k] { "chg" }, title: if hs[k] != bs[k] { "was {bs[k]}" },
+                label { class: if hs[k] != bs[k] { "chg" }, title: if hs[k] != bs[k] { "was {bs[k]}" },
                     span { "{STATS_SHORT[k]}" }
-                    b { "{hs[k]}" }
+                    // Edited in place: a click here doesn't select the uma, a double-click doesn't open the drawer.
+                    input {
+                        id: "fstat-{i}-{k}",
+                        r#type: "number",
+                        min: 1,
+                        max: STAT_MAX,
+                        value: "{hs[k]}",
+                        onclick: |e| e.stop_propagation(),
+                        ondoubleclick: |e| e.stop_propagation(),
+                        oninput: move |e| {
+                            if let Ok(v) = e.value().parse::<i32>() {
+                                edit(s, i, |h| *stat_mut(h, k) = v.clamp(1, STAT_MAX));
+                            }
+                        },
+                        onchange: move |_| resync(&format!("fstat-{i}-{k}"), stats(&s.input.peek().horses[i])[k]),
+                    }
                 }
             }
         };
@@ -130,7 +189,7 @@ pub(super) fn FieldCard() -> Element {
                         // Team tags on the second line: next to a long name they'd be cut by the ellipsis.
                         // Tags never truncate; the costume gives way first, then the trainer.
                         div { class: "muted small row2 fit", title: "{sub}",
-                            {team_tags(&input, player, i)}
+                            {team_pick(s, &input, player, i)}
                             span { class: "costume", "{title}" }
                             if !trainer.is_empty() { span { class: "trainer", "{trainer}" } }
                         }
@@ -160,7 +219,7 @@ pub(super) fn FieldCard() -> Element {
                         {horse_icon(h, Some(&cols[i]), "lg")}
                         div { class: "uma-name",
                             b { "{chara_name(h.chara_id)}" }
-                            {team_tags(&input, player, i)}
+                            {team_pick(s, &input, player, i)}
                             div { class: "muted small", "{title}" }
                             div { class: "muted small", if trainer.is_empty() { "Gate {i + 1}" } else { "Gate {i + 1} · {trainer}" } }
                         }
@@ -177,11 +236,37 @@ pub(super) fn FieldCard() -> Element {
         }
     });
     let is_save = race.path.is_some();
+    let mut fs = s.field_size;
+    let cap = *fs.read();
     rsx! {
         details { class: "card fold", open: true,
             summary { class: "card-h",
                 h3 { "Field" }
-                span { class: "muted", "{n} of {MAX_FIELD} · click to select, double-click to edit" }
+                span { class: "muted fsize",
+                    "{n} umas"
+                    span { class: "small", "{FIELD_MIN}" }
+                    div { class: "fs-slider", style: "--f: {(cap - FIELD_MIN) as f32 / (MAX_FIELD - FIELD_MIN) as f32}",
+                        div { class: "fs-ticks",
+                            for _ in FIELD_MIN..=MAX_FIELD {
+                                i {}
+                            }
+                        }
+                        input {
+                            r#type: "range",
+                            title: "Field size",
+                            min: FIELD_MIN,
+                            max: MAX_FIELD,
+                            value: "{cap}",
+                            oninput: move |e| {
+                                if let Ok(v) = e.value().parse::<usize>() {
+                                    fs.set(v.clamp(n.max(FIELD_MIN), MAX_FIELD));
+                                }
+                            },
+                        }
+                        b { "{cap}" }
+                    }
+                    span { class: "small", "{MAX_FIELD}" }
+                }
                 div { class: "seg small",
                     button { class: if !compact { "on" }, onclick: move |_| {
                             s.compact.set(false);
@@ -221,7 +306,7 @@ pub(super) fn FieldCard() -> Element {
             }
             div { class: if compact { "umas compact" } else { "umas" },
                 {rows}
-                if n < MAX_FIELD {
+                if n < cap {
                     button { class: if compact { "umarow add" } else { "uma add" }, onclick: move |_| s.picker.set(true),
                         span { class: "plus", "+" }
                         "Add uma"

@@ -2,7 +2,7 @@ use uma_race_sim::api::{HorseInput, RaceInput, SkillInput};
 
 use super::{Dist, GRADE_A, MAX_STAMINA, Race, STYLES, Work, ability_type, cards, course_info, custom_popularity, default_level, dist, distance_type, gap_lengths, names, new_horse, par_map, run_once, seeds, set_card};
 
-/// Umas in an NPC field: the measured uma and 8 NPCs; smaller fields are topped up to it.
+/// Default NPC field size (a Champions Meeting field): the measured uma and 8 NPCs.
 pub const FIELD_MIN: usize = 9;
 
 /// The styles `LOBBIES` counts, in order: Runaway, then the running styles.
@@ -20,47 +20,58 @@ pub const LOBBIES: [(&str, [usize; 5]); 8] = [
     ("3 Runaways", [3, 2, 2, 1, 0]),
 ];
 
-/// The field to measure in, and the measured uma's index in it. `alone`: `input.horses[horse]` at gate 5 among 8 NPCs;
-/// else `input`'s field with NPCs after it up to `FIELD_MIN`. NPCs: `LOBBIES[lobby]`'s styles round-robin (a top-up
-/// takes the first few, so it stays mixed), each a costume of that default style and an unused chara, `new_horse`
+/// The `LOBBY_STYLES` index of each of `n` NPCs: `LOBBIES[lobby]`'s counts round-robin (a top-up takes the first few,
+/// so it stays mixed), starting over past 8.
+pub fn lobby_styles(lobby: usize, n: usize) -> Vec<usize> {
+    let mix = LOBBIES[lobby.min(LOBBIES.len() - 1)].1;
+    let (mut out, mut left) = (Vec::new(), mix);
+    while out.len() < n {
+        if left.iter().all(|&k| k == 0) {
+            left = mix;
+        }
+        for (k, l) in left.iter_mut().enumerate() {
+            if *l > 0 && out.len() < n {
+                *l -= 1;
+                out.push(k);
+            }
+        }
+    }
+    out
+}
+
+/// The field to measure in, and the measured uma's index in it. `alone`: `input.horses[horse]` at the middle gate
+/// among `size - 1` NPCs; else `input`'s field with NPCs after it up to `size`. NPCs: `lobby_styles`, each a costume of that default style and an unused chara, `new_horse`
 /// stats and unique, stamina at the cap (raw 2800, 2000 after the halving) so they keep a full spurt, A aptitude for
 /// style, distance and surface. Popularity is re-ranked when NPCs were added.
-pub fn npc_field(race: &Race, input: &RaceInput, horse: usize, alone: bool, lobby: usize) -> (RaceInput, usize) {
+pub fn npc_field(race: &Race, input: &RaceInput, horse: usize, alone: bool, lobby: usize, size: usize) -> (RaceInput, usize) {
     let mut out = input.clone();
     let field = if alone { vec![out.horses.swap_remove(horse)] } else { std::mem::take(&mut out.horses) };
-    let n_npc = if alone { FIELD_MIN - 1 } else { FIELD_MIN.saturating_sub(field.len()) };
+    let n_npc = if alone { size.saturating_sub(1) } else { size.saturating_sub(field.len()) };
     let c = course_info(&race.data, input.course_set_id);
     let dt = distance_type(c.distance);
     let runaway = race.data.skills.keys().copied().filter(|&id| sets_style(race, id)).min();
-    let mut left = LOBBIES[lobby.min(LOBBIES.len() - 1)].1;
     let mut used: Vec<i32> = field.iter().map(|h| h.chara_id).collect();
     let mut made = Vec::new();
-    while made.len() < n_npc && left.iter().any(|&k| k > 0) {
-        for (k, n) in left.iter_mut().enumerate() {
-            if *n == 0 || made.len() == n_npc {
-                continue;
-            }
-            *n -= 1;
-            let style = k.max(1) as i32; // Runaway runs Front
-            let card = cards().iter().find(|x| {
-                names().card.get(&x.card_id).is_some_and(|n| n.running_style == style) && !used.contains(&x.chara_id) && race.data.skills.contains_key(&x.unique_skill)
-            });
-            let Some(card) = card else { continue };
-            used.push(card.chara_id);
-            let mut h = new_horse(race, card.card_id);
-            h.running_style = style;
-            h.proper_running_style[style as usize - 1] = GRADE_A;
-            h.proper_distance[dt] = GRADE_A;
-            h.proper_ground[(c.surface - 1).clamp(0, 1) as usize] = GRADE_A;
-            h.stamina = MAX_STAMINA;
-            if let (0, Some(id)) = (k, runaway) {
-                h.skills.push(SkillInput { skill_id: id, level: 1 });
-            }
-            h.viewer_id = 0;
-            made.push(h);
+    for k in lobby_styles(lobby, n_npc) {
+        let style = k.max(1) as i32; // Runaway runs Front
+        let card = cards().iter().find(|x| {
+            names().card.get(&x.card_id).is_some_and(|n| n.running_style == style) && !used.contains(&x.chara_id) && race.data.skills.contains_key(&x.unique_skill)
+        });
+        let Some(card) = card else { continue };
+        used.push(card.chara_id);
+        let mut h = new_horse(race, card.card_id);
+        h.running_style = style;
+        h.proper_running_style[style as usize - 1] = GRADE_A;
+        h.proper_distance[dt] = GRADE_A;
+        h.proper_ground[(c.surface - 1).clamp(0, 1) as usize] = GRADE_A;
+        h.stamina = MAX_STAMINA;
+        if let (0, Some(id)) = (k, runaway) {
+            h.skills.push(SkillInput { skill_id: id, level: 1 });
         }
+        h.viewer_id = 0;
+        made.push(h);
     }
-    let i = if alone { made.len().min(4) } else { horse };
+    let i = if alone { made.len() / 2 } else { horse };
     let added = !made.is_empty();
     out.horses = if alone { [&made[..i], &field[..], &made[i..]].concat() } else { [field, made].concat() };
     (if added { custom_popularity(&out) } else { out }, i)

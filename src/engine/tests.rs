@@ -63,20 +63,25 @@ fn custom_race() {
     assert!(skill_gains(&race, &race.input, 0, &cands, 8, &w).0.is_empty());
 
     // NPC lobby: the measured uma at gate 5 among 8 NPCs of distinct charas; the front-heavy end has 3 Runaways.
-    let (f, i) = npc_field(&race, &new_race().input, 0, true, LOBBIES.len() - 1);
+    let (f, i) = npc_field(&race, &new_race().input, 0, true, LOBBIES.len() - 1, FIELD_MIN);
     assert_eq!((f.horses.len(), i, f.horses[i].card_id), (FIELD_MIN, 4, 105201));
     assert_eq!(f.horses.iter().filter(|h| runaway(&race, h)).count(), 3);
     assert_eq!(f.horses.iter().map(|h| h.chara_id).collect::<std::collections::HashSet<_>>().len(), FIELD_MIN);
     // Top-up: a 9-uma field stays as is, a 2-uma one gets 7 NPCs after it.
     let ids = |v: &[HorseInput]| v.iter().map(|h| h.card_id).collect::<Vec<_>>();
-    assert_eq!(ids(&npc_field(&race, &f, 2, false, 2).0.horses), ids(&f.horses));
+    assert_eq!(ids(&npc_field(&race, &f, 2, false, 2, FIELD_MIN).0.horses), ids(&f.horses));
     let two = RaceInput { horses: f.horses[3..5].to_vec(), ..f.clone() };
-    let (t, j) = npc_field(&race, &two, 1, false, 2);
+    let (t, j) = npc_field(&race, &two, 1, false, 2, FIELD_MIN);
     assert_eq!((t.horses.len(), j, ids(&t.horses[..2])), (FIELD_MIN, 1, ids(&two.horses)));
+    // A full 18 field: 17 NPCs of distinct charas, the lobby mix repeated, the uma at the middle gate.
+    let (big, k) = npc_field(&race, &new_race().input, 0, true, 2, 18);
+    assert_eq!((big.horses.len(), k, big.horses[k].card_id), (18, 8, 105201));
+    assert_eq!(big.horses.iter().map(|h| h.chara_id).collect::<std::collections::HashSet<_>>().len(), 18);
+    assert_eq!(lobby_styles(2, 10), [1, 2, 3, 4, 1, 2, 3, 4, 1, 2]);
     // NPCs keep a full spurt on the longest course.
     let mut long = new_race().input;
     set_course(&race, &mut long, cs_long(&race));
-    let (f, _) = npc_field(&race, &long, 0, true, 2);
+    let (f, _) = npc_field(&race, &long, 0, true, 2, FIELD_MIN);
     for s in seeds(1, 4) {
         let run = run_once(&race, &RaceInput { random_seed: s, ..f.clone() });
         assert!(f.horses.iter().zip(&run.horses).all(|(h, r)| h.viewer_id != 0 || r.full_spurt), "seed {s}");

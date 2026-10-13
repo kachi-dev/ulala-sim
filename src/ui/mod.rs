@@ -103,8 +103,9 @@ struct GainsRes {
     /// Candidates asked for (fewer come back when cancelled).
     asked: usize,
     npc: bool,
-    /// NPC lobby measured in (for "Improve fidelity", which re-measures one skill in the same field).
+    /// NPC lobby and field size measured in (for "Improve fidelity", which re-measures one skill in the same field).
     lobby: usize,
+    size: usize,
     /// Umas of the measured field with a low full-spurt rate (`low_spurts`).
     low_spurt: Vec<String>,
     rev: u64,
@@ -210,6 +211,8 @@ struct S {
     g_npc: Signal<Option<bool>>,
     /// NPC lobby (index into `LOBBIES`), shared by Skill gains and Uma ranking.
     npc_lobby: Signal<usize>,
+    /// The setup field's size: umas it takes, and what NPCs fill up to. `FIELD_MIN`, or an opened save's field size.
+    field_size: Signal<usize>,
     /// Editor skill picker filters (kept between openings).
     pick_filter: Signal<skills::SkillFilter>,
     // Uma ranking tab
@@ -295,6 +298,7 @@ pub fn App() -> Element {
         g_owned: use_signal(|| false),
         g_npc: use_signal(|| None),
         npc_lobby: use_signal(|| 2),
+        field_size: use_signal(|| FIELD_MIN),
         pick_filter: use_signal(Default::default),
         r_npc: use_signal(|| None),
         r_styles: use_signal(|| vec![1, 2, 3, 4]),
@@ -329,7 +333,7 @@ pub fn App() -> Element {
     use_effect(move || {
         let race = s.race.read();
         let Some(race) = race.as_ref() else { return };
-        save_session(race.path.as_deref(), &s.input.read(), &s.trainers.read(), s.baseline.read().as_deref());
+        save_session(race.path.as_deref(), &s.input.read(), &s.trainers.read(), s.baseline.read().as_deref(), *s.field_size.read());
     });
     // Ctrl+O opens the Races modal, Esc closes overlays (a page-level listener: focus may be anywhere, or nowhere).
     use_future(move || async move {

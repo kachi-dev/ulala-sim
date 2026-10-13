@@ -23,7 +23,7 @@ const ACCURACY_N: usize = 2000;
 /// in the same field and swaps it in.
 fn improve_accuracy(s: S, id: i32) {
     let (Some(race), Some(r)) = (s.race.cloned(), s.g_res.cloned()) else { return };
-    let (mut input, i) = npc_field(&race, &s.input.peek(), r.horse, r.npc, r.lobby);
+    let (mut input, i) = npc_field(&race, &s.input.peek(), r.horse, r.npc, r.lobby, r.size);
     input.random_seed = random_seed();
     let work = ACCURACY_N * 2 * input.horses.len();
     let label = format!("Measuring {} × {} seeds", skill_info(id).name, thousands(ACCURACY_N));
@@ -94,8 +94,8 @@ pub fn GainsTab() -> Element {
         if cands.is_empty() {
             return;
         }
-        let lobby = *s.npc_lobby.peek();
-        let (input, i) = npc_field(&race, &s.input.peek(), hi, npc, lobby);
+        let (lobby, size) = (*s.npc_lobby.peek(), *s.field_size.peek());
+        let (input, i) = npc_field(&race, &s.input.peek(), hi, npc, lobby, size);
         let (cands, rev, field) = (cands.clone(), *s.rev.peek(), input.horses.clone());
         let (card, chara, asked) = (horse.card_id, horse.chara_id, cands.len());
         let label = format!("Measuring {} skills × {n} seeds", thousands(asked));
@@ -103,7 +103,7 @@ pub fn GainsTab() -> Element {
         measure(s, label, asked * n, work, run, move |mut s, (items, spurt)| {
             s.g_sel.set(None);
             let low_spurt = low_spurts(&field, &spurt);
-            s.g_res.set(Some(GainsRes { horse: hi, card, chara, items: Arc::new(items), cv, n, asked, npc, lobby, low_spurt, rev }));
+            s.g_res.set(Some(GainsRes { horse: hi, card, chara, items: Arc::new(items), cv, n, asked, npc, lobby, size, low_spurt, rev }));
             reveal("gains");
         });
     };

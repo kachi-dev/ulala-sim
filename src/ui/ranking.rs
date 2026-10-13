@@ -69,7 +69,7 @@ pub fn RankingTab() -> Element {
         if combos == 0 {
             return;
         }
-        let (input, i) = npc_field(&race, &s.input.peek(), hi, npc, *s.npc_lobby.peek());
+        let (input, i) = npc_field(&race, &s.input.peek(), hi, npc, *s.npc_lobby.peek(), *s.field_size.peek());
         let (cards, styles, rev, field) = (picked.clone(), styles.clone(), *s.rev.peek(), input.horses.clone());
         let label = format!("Ranking {} umas × {} styles × {n} seeds", cards.len(), styles.len());
         let run = move |w: &Work| uma_ranking(&race, &input, i, &cards, &styles, n, w);
