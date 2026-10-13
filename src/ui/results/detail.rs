@@ -24,14 +24,14 @@ fn race_traces(h: &HorseStats) -> RaceTraces {
 pub(super) fn horse_detail(
     s: S,
     res: &Res,
-    names: &[String],
     i: usize,
     cur: &Arc<Batch>,
     base: Option<&Arc<Batch>>,
     diff: Option<&BatchDiff>,
 ) -> Element {
     let Some(race) = s.race.cloned() else { return rsx! {} };
-    let (mut focus, mut skill_sel) = (s.focus, s.skill_sel);
+    let (mut focus, mut skill_sel, mut detail_tab) = (s.focus, s.skill_sel, s.detail_tab);
+    let tab = *detail_tab.read();
     let h = &cur.horses[i];
     let b = base.map(|b| &b.horses[i]);
     // Charts of one uma: the accent; her team / gate colour stays on her icon.
@@ -64,91 +64,168 @@ pub(super) fn horse_detail(
     rsx! {
         section { class: "card detail",
             div { class: "card-h",
-                {horse_icon(&res.input.horses[i], Some(&res.colors[i]), "md")}
-                h3 { "{names[i]}" }
+                UmaPick { i }
                 span { class: "muted", "{style_name(&race, &res.input.horses[i])} · over {cur.seeds.len()} races" }
                 div { class: "grow" }
                 UmaLinks { i, card: res.input.horses[i].card_id }
                 button { class: "btn icon", title: "Close", onclick: move |_| focus.set(None), {icon("x")} }
             }
-            div { class: "kpirow",
-                div { class: "kpis",
-                    div { b { "{pct(h.win_rate)}" } span { "win" } }
-                    div { b { "{h.place.mean:.2}" } span { "avg place" } }
-                    div { b { "{ft(h.finish_time.p50)}" } span { "median time" } }
-                    div { b { "{pct(h.full_spurt_rate)}" } span { "full spurt" } }
-                    div { b { "{pct(h.hp_out_rate)}" } span { "ran out of HP" } }
-                }
-                if n > 1 {
-                    div { class: "placebox",
-                        span { class: "muted small", "Finishing place" if b.is_some() { " (outline: baseline)" } }
-                        BarChart { bars, compare, color: color.clone() }
+            div { class: "seg small dtabs",
+                for (k, label) in ["Summary", "Skills", "Stamina"].into_iter().enumerate() {
+                    button {
+                        class: if tab == k { "on" },
+                        onclick: move |_| {
+                            detail_tab.set(k);
+                            // The open skill also marks the course map; it belongs to the Skills tab.
+                            if k != 1 {
+                                skill_sel.set(None);
+                            }
+                        },
+                        "{label}"
                     }
                 }
             }
-            if let Some(d) = diff {
-                {vs_baseline(d, res.ed_mask.get(i) == Some(&true), &color)}
-            }
-            h4 { "Over the course" span { class: "muted small", " (mean, shaded p10 to p90)" } }
-            RaceChart {
-                cur: race_traces(h),
-                base: b.map(race_traces),
-                field_size: n,
-                course_distance: cv.distance,
-                phases: cv.phases.to_vec(),
-                corners: cv.corner_spans(),
-                straights: cv.straights.iter().map(|c| (c.start, c.end)).collect::<Vec<_>>(),
-            }
-            {spurt_and_hp(h, cv, &color)}
-            h4 { "Skills" }
-            div { class: "olegend muted small",
-                for (k, (label, hint)) in OUTCOMES.iter().enumerate() {
-                    span { title: "{hint}", i { class: "o{k}" } "{label}" }
-                }
-            }
-            div { class: "cols",
-                table { class: "grid",
-                    thead {
-                        tr {
-                            th { "Skill" }
-                            th { class: "num", "Activates" }
-                            th { "Outcomes" }
+            if tab == 0 {
+                div { class: "kpirow",
+                    div { class: "kpis",
+                        div { b { "{pct(h.win_rate)}" } span { "win" } }
+                        div { b { "{h.place.mean:.2}" } span { "avg place" } }
+                        div { b { "{ft(h.finish_time.p50)}" } span { "median time" } }
+                        div { b { "{pct(h.full_spurt_rate)}" } span { "full spurt" } }
+                        div { b { "{pct(h.hp_out_rate)}" } span { "ran out of HP" } }
+                    }
+                    if n > 1 {
+                        div { class: "placebox",
+                            span { class: "muted small", "Finishing place" if b.is_some() { " (outline: baseline)" } }
+                            BarChart { bars, compare, color: color.clone() }
                         }
                     }
-                    tbody {
-                        for id in ids {
-                            {
-                                let r = rate(h, id);
-                                let on = *skill_sel.read() == Some((i, id));
-                                rsx! {
-                                    tr {
-                                        class: if on { "sel" },
-                                        title: "Click for where it activates",
-                                        onclick: move |_| {
-                                            skill_sel.set(if on { None } else { Some((i, id)) });
-                                            reveal("skdetail");
-                                        },
-                                        td { {skill_row(&skill_info(id), None, mark(id))} }
-                                        td { class: "num",
-                                            "{pct(r)}"
-                                            if let Some(b) = b {
-                                                if pct(rate(b, id)) != pct(r) { div { class: "was", "was {pct(rate(b, id))}" } }
+                }
+                if let Some(d) = diff {
+                    {vs_baseline(d, res.ed_mask.get(i) == Some(&true), &color)}
+                }
+                h4 { "Over the course" span { class: "muted small", " (mean, shaded p10 to p90)" } }
+                RaceChart {
+                    cur: race_traces(h),
+                    base: b.map(race_traces),
+                    field_size: n,
+                    course_distance: cv.distance,
+                    phases: cv.phases.to_vec(),
+                    corners: cv.corner_spans(),
+                    straights: cv.straights.iter().map(|c| (c.start, c.end)).collect::<Vec<_>>(),
+                }
+            }
+            if tab == 2 {
+                {spurt_and_hp(h, cv, &color)}
+            }
+            if tab == 1 {
+                div { class: "olegend muted small",
+                    for (k, (label, hint)) in OUTCOMES.iter().enumerate() {
+                        span { title: "{hint}", i { class: "o{k}" } "{label}" }
+                    }
+                }
+                div { class: "cols",
+                    table { class: "grid",
+                        thead {
+                            tr {
+                                th { "Skill" }
+                                th { class: "num", "Activates" }
+                                th { "Outcomes" }
+                            }
+                        }
+                        tbody {
+                            for id in ids {
+                                {
+                                    let r = rate(h, id);
+                                    let on = *skill_sel.read() == Some((i, id));
+                                    rsx! {
+                                        tr {
+                                            class: if on { "sel" },
+                                            title: "Click for where it activates",
+                                            onclick: move |_| {
+                                                skill_sel.set(if on { None } else { Some((i, id)) });
+                                                reveal("skdetail");
+                                            },
+                                            td { {skill_row(&skill_info(id), None, mark(id))} }
+                                            td { class: "num",
+                                                "{pct(r)}"
+                                                if let Some(b) = b {
+                                                    if pct(rate(b, id)) != pct(r) { div { class: "was", "was {pct(rate(b, id))}" } }
+                                                }
                                             }
-                                        }
-                                        td {
-                                            if let Some(o) = outcomes(id) { div { class: "oline", {outcome_bar(&o)} } }
-                                            if b.is_some_and(|b| pct(rate(b, id)) != pct(r)) { div { class: "was", visibility: "hidden", "was" } }
+                                            td {
+                                                if let Some(o) = outcomes(id) { div { class: "oline", {outcome_bar(&o)} } }
+                                                if b.is_some_and(|b| pct(rate(b, id)) != pct(r)) { div { class: "was", visibility: "hidden", "was" } }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
+                    CourseStrip { rows: strip, course_distance: cv.distance, final_leg_start: cv.final_leg_start }
                 }
-                CourseStrip { rows: strip, course_distance: cv.distance, final_leg_start: cv.final_leg_start }
+                if let Some(st) = sel_stat {
+                    {skill_detail(st, cv, &color, skill_sel)}
+                }
             }
-            if let Some(st) = sel_stat {
-                {skill_detail(st, cv, &color, skill_sel)}
+        }
+    }
+}
+
+/// The detail's uma as a dropdown of the run's umas in finishing order (a batch: by mean place): costume icon, name,
+/// finishing place / rank, team tags and costume. Picking one focuses it, which also selects it in the field.
+#[component]
+pub(super) fn UmaPick(i: usize) -> Element {
+    let s = use_context::<S>();
+    let mut open = use_signal(|| false);
+    let Some(res) = s.res.cloned() else { return rsx! {} };
+    let mut order: Vec<usize> = (0..res.input.horses.len()).collect();
+    match &res.kind {
+        Kind::Batch { cur, .. } => order.sort_by(|&a, &b| cur.horses[a].place.mean.total_cmp(&cur.horses[b].place.mean)),
+        Kind::Single { cur, .. } => order.sort_by_key(|&a| cur.horses[a].place),
+    }
+    let row = |j: usize, rank: usize, size: &str| {
+        let h = &res.input.horses[j];
+        rsx! {
+            {horse_icon(h, Some(&res.colors[j]), size)}
+            div { class: "upick-who",
+                div {
+                    b { "{chara_name(h.chara_id)}" }
+                    span { class: "gate", "#{rank}" }
+                    {team_tags(&res.input, res.player, j)}
+                }
+                div { class: "muted small", "{card_title(h.card_id)}" }
+            }
+        }
+    };
+    let rank = |j: usize| order.iter().position(|&k| k == j).unwrap_or(0) + 1;
+    rsx! {
+        div { class: "upick",
+            button { class: "upick-btn", title: "Show another uma", onclick: move |_| open.toggle(),
+                {row(i, rank(i), "md")}
+                {icon("down")}
+            }
+            if open() {
+                div { class: "menu-catch", onclick: move |_| open.set(false) }
+                div { class: "upick-list",
+                    for (r, &j) in order.iter().enumerate() {
+                        {
+                            let card = res.input.horses[j].card_id;
+                            rsx! {
+                                button {
+                                    key: "{j}",
+                                    class: if j == i { "on" },
+                                    onclick: move |_| {
+                                        open.set(false);
+                                        focus_gate(s, j, card);
+                                    },
+                                    {row(j, r + 1, "sm")}
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -170,7 +247,7 @@ fn outcome_bar(o: &[f32; 4]) -> Element {
 /// "Edit uma" / "Measure skill gains" for gate `i` of a past run: the same uma in the current field (same gate if it
 /// still is that costume, else the first match). A component, so following the field doesn't re-render the results.
 #[component]
-fn UmaLinks(i: usize, card: i32) -> Element {
+pub(super) fn UmaLinks(i: usize, card: i32) -> Element {
     let s = use_context::<S>();
     let (mut sel, mut g_owned, mut editing) = (s.sel, s.g_owned, s.editing);
     let at = {

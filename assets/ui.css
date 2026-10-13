@@ -406,6 +406,7 @@ table.gains td { padding-top: 3px; padding-bottom: 3px; }
 .warn-dot { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--warn-ink); color: var(--warn-bg); font-weight: 800; font-size: 12px; cursor: help; }
 .ell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seg.small button { padding: 3px 9px; font-size: 12px; }
+.dtabs { margin: 2px 0 12px; }
 .seg-label { margin-left: 6px; margin-right: -2px; font-size: 12px; font-weight: 700; color: var(--muted); }
 .race-h { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 6px; }
 .race-h .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
@@ -476,6 +477,26 @@ table.gains td { padding-top: 3px; padding-bottom: 3px; }
 .tb-tools { display: flex; align-self: stretch; }
 .tb-tools .tb-btn { width: 34px; }
 .menu-catch { position: fixed; inset: 0; z-index: 60; }
+.upick { position: relative; min-width: 0; }
+.upick-btn {
+  display: flex; align-items: center; gap: 10px; min-width: 0; padding: 3px 8px 3px 3px; border: 1px solid transparent;
+  border-radius: 12px; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.upick-btn:hover, .upick-btn:focus-visible { border-color: var(--line); background: var(--surface-2); }
+.upick-btn b { font-size: 17px; }
+.upick-btn .ico { color: var(--muted); }
+.upick-who { min-width: 0; }
+.upick-who .gate { margin-left: 6px; }
+.upick-list {
+  position: absolute; z-index: 75; top: calc(100% + 4px); left: 0; min-width: 320px; max-height: 60vh; overflow-y: auto;
+  padding: 4px; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
+}
+.upick-list button {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 5px 8px; border: 0; border-radius: 8px;
+  background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.upick-list button:hover, .upick-list button:focus-visible { background: var(--surface-2); }
+.upick-list button.on { background: var(--accent-soft); }
 .menu {
   position: fixed; z-index: 75; top: calc(var(--titlebar-h) + 6px); right: 8px; width: 270px; padding: 10px 14px 12px;
   background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);

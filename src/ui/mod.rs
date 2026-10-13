@@ -166,6 +166,8 @@ struct S {
     focus: Signal<Option<usize>>,
     /// (horse, skill) open in the batch uma detail: fine activation view + its region on the pinned course.
     skill_sel: Signal<Option<(usize, i32)>>,
+    /// Batch uma detail tab: 0 Summary, 1 Skills, 2 Stamina (kept when another uma is shown).
+    detail_tab: Signal<usize>,
     editing: Signal<Option<usize>>,
     /// The skill picker over the edit drawer (the card's "Add skill" opens both).
     skill_pick: Signal<bool>,
@@ -250,6 +252,7 @@ pub fn App() -> Element {
         sel: use_signal(|| 0),
         focus: use_signal(|| None),
         skill_sel: use_signal(|| None),
+        detail_tab: use_signal(|| 0),
         editing: use_signal(|| None),
         skill_pick: use_signal(|| false),
         picker: use_signal(|| false),

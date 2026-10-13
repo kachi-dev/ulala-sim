@@ -1,10 +1,13 @@
-//! Single-run results: finish table, positions over the course, skill activations.
+//! Single-run results: finish table, then every uma's positions over the course and skill activations, or the
+//! focused uma's detail (Summary: over the course with events; Skills: activations and misses).
 
 use super::*;
+use super::detail::{UmaLinks, UmaPick};
 use crate::charts::*;
 
 pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Option<&Run>) -> Element {
-    let mut focus = s.focus;
+    let (mut focus, mut detail_tab) = (s.focus, s.detail_tab);
+    let tab = *detail_tab.read();
     let n = cur.horses.len();
     let f = (*focus.read()).filter(|&f| f < n);
     let diffs = base.map(|b| diff_runs(b, cur));
@@ -13,8 +16,19 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
     order.sort_by_key(|&i| cur.horses[i].place);
     let improved = diffs.as_ref().is_some_and(|d| d.iter().zip(ed).any(|(d, &m)| m && d.place.1 < d.place.0));
 
-    // The course chart follows the focused uma, else the first edited one, else the winner.
-    let me = f.or_else(|| ed.iter().position(|&m| m)).unwrap_or(order[0]);
+    // Focused: that uma's chart. Else every uma's position, edited ones on top with their baseline dashed.
+    let me = f.unwrap_or(order[0]);
+    let line = |run: &Run, i: usize, dashed: bool| PlaceSeries {
+        label: if dashed { format!("{} (baseline)", names[i]) } else { names[i].clone() },
+        color: res.colors[i].clone(),
+        line: run.horses[i].place_by_progress.iter().map(|&p| p as f32).collect(),
+        inner: None,
+        outer: None,
+        dashed,
+        highlight: ed[i],
+    };
+    let mut series: Vec<PlaceSeries> = base.map_or(vec![], |b| (0..n).filter(|&i| ed[i]).map(|i| line(b, i, true)).collect());
+    series.extend((0..n).map(|i| line(cur, i, false)));
     let traces = |run: &Run| {
         let h = &run.horses[me];
         let t = |line: Vec<f32>| Trace { line, fan: vec![] };
@@ -39,6 +53,10 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
         .collect();
     let all = f.is_none() && n > 1;
     let cv = &res.cv;
+    let style = match (f, s.race.cloned()) {
+        (Some(f), Some(race)) => format!("{} · seed {}", style_name(&race, &res.input.horses[f]), cur.seed),
+        _ => String::new(),
+    };
 
     rsx! {
         section { class: "card",
@@ -165,70 +183,139 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                 }
             }
         }
-        section { class: "card",
-            div { class: "card-h",
-                h3 { "Over the course" }
-                span { class: "muted", "{names[me]}" }
-            }
-            RaceChart {
-                cur: traces(cur),
-                base: base.map(traces),
-                field_size: n,
-                course_distance: cv.distance,
-                phases: cv.phases.to_vec(),
-                corners: cv.corner_spans(),
-                straights: cv.straights.iter().map(|c| (c.start, c.end)).collect::<Vec<_>>(),
-                bands: state_bands(&cur.horses[me]),
-                base_bands: base.map_or(vec![], |b| state_bands(&b.horses[me])),
-            }
-        }
-        section { class: "card",
-            div { class: "card-h",
-                h3 { "Skill activations" }
-                span { class: "muted", if let Some(f) = f { "{names[f]}" } else { "all umas, click a result row to focus one" } }
-            }
-            CourseStrip { rows: strip, course_distance: cv.distance, final_leg_start: cv.final_leg_start }
-            if !missed.is_empty() {
-                details { class: "acts", open: f.is_some() || n == 1,
-                    summary { "{missed.len()} skill" if missed.len() != 1 { "s" } " didn't activate" }
-                    table { class: "grid",
-                        thead {
-                            tr {
-                                if all { th { "Uma" } }
-                                th { "Skill" }
-                                th { "Reason" }
+        if let Some(f) = f {
+            section { class: "card detail",
+                div { class: "card-h",
+                    UmaPick { i: f }
+                    span { class: "muted", "{style}" }
+                    div { class: "grow" }
+                    UmaLinks { i: f, card: res.input.horses[f].card_id }
+                    button { class: "btn icon", title: "Close", onclick: move |_| focus.set(None), {icon("x")} }
+                }
+                div { class: "seg small dtabs",
+                    for (k, label) in ["Summary", "Skills"].into_iter().enumerate() {
+                        button { class: if tab == k { "on" }, onclick: move |_| detail_tab.set(k), "{label}" }
+                    }
+                }
+                if tab == 1 {
+                    CourseStrip { rows: strip, course_distance: cv.distance, final_leg_start: cv.final_leg_start }
+                    if !missed.is_empty() {
+                        details { class: "acts", open: true,
+                            summary { "{missed.len()} skill" if missed.len() != 1 { "s" } " didn't activate" }
+                            table { class: "grid",
+                                thead {
+                                    tr {
+                                        if all { th { "Uma" } }
+                                        th { "Skill" }
+                                        th { "Reason" }
+                                    }
+                                }
+                                tbody {
+                                    for (i, c) in missed {
+                                        tr {
+                                            if all { td { class: "who", {who(res, names, i)} } }
+                                            td { SkillX { id: c.skill_id } }
+                                            td { {why(c, &cur.horses[i], cur.goal, n)} }
+                                        }
+                                    }
+                                }
                             }
                         }
-                        tbody {
-                            for (i, c) in missed {
+                    }
+                    details { class: "acts",
+                        summary { "{acts.len()} activations" }
+                        table { class: "grid",
+                            thead {
                                 tr {
-                                    if all { td { class: "who", {who(res, names, i)} } }
-                                    td { SkillX { id: c.skill_id } }
-                                    td { {why(c, &cur.horses[i], cur.goal, n)} }
+                                    th { class: "num", "Time" }
+                                    th { "Uma" }
+                                    th { "Skill" }
+                                    th { class: "num", "Distance" }
+                                }
+                            }
+                            tbody {
+                                for a in acts {
+                                    tr {
+                                        td { class: "num", "{ft(a.time)}" }
+                                        td { class: "who", {who(res, names, a.horse)} }
+                                        td { SkillX { id: a.skill_id } }
+                                        td { class: "num", "{a.distance:.0} m" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    h4 { "Over the course" }
+                    RaceChart {
+                        cur: traces(cur),
+                        base: base.map(traces),
+                        field_size: n,
+                        course_distance: cv.distance,
+                        phases: cv.phases.to_vec(),
+                        corners: cv.corner_spans(),
+                        straights: cv.straights.iter().map(|c| (c.start, c.end)).collect::<Vec<_>>(),
+                        bands: state_bands(&cur.horses[me]),
+                        base_bands: base.map_or(vec![], |b| state_bands(&b.horses[me])),
+                    }
+                }
+            }
+        } else {
+            section { class: "card",
+                div { class: "card-h",
+                    h3 { "Over the course" }
+                    span { class: "muted", if n > 1 { "positions of every uma" } if base.is_some() && ed.iter().any(|&m| m) { ", edited ones on top with the baseline dashed" } }
+                }
+                PlaceChart { series, field_size: n, markers: vec![(cv.final_leg_start / cv.distance * 100.0, "Late race".to_string())] }
+            }
+            section { class: "card",
+                div { class: "card-h",
+                    h3 { "Skill activations" }
+                    span { class: "muted", "all umas, click a result row to focus one" }
+                }
+                CourseStrip { rows: strip, course_distance: cv.distance, final_leg_start: cv.final_leg_start }
+                if !missed.is_empty() {
+                    details { class: "acts", open: n == 1,
+                        summary { "{missed.len()} skill" if missed.len() != 1 { "s" } " didn't activate" }
+                        table { class: "grid",
+                            thead {
+                                tr {
+                                    if all { th { "Uma" } }
+                                    th { "Skill" }
+                                    th { "Reason" }
+                                }
+                            }
+                            tbody {
+                                for (i, c) in missed {
+                                    tr {
+                                        if all { td { class: "who", {who(res, names, i)} } }
+                                        td { SkillX { id: c.skill_id } }
+                                        td { {why(c, &cur.horses[i], cur.goal, n)} }
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            details { class: "acts",
-                summary { "{acts.len()} activations" }
-                table { class: "grid",
-                    thead {
-                        tr {
-                            th { class: "num", "Time" }
-                            th { "Uma" }
-                            th { "Skill" }
-                            th { class: "num", "Distance" }
-                        }
-                    }
-                    tbody {
-                        for a in acts {
+                details { class: "acts",
+                    summary { "{acts.len()} activations" }
+                    table { class: "grid",
+                        thead {
                             tr {
-                                td { class: "num", "{ft(a.time)}" }
-                                td { class: "who", {who(res, names, a.horse)} }
-                                td { SkillX { id: a.skill_id } }
-                                td { class: "num", "{a.distance:.0} m" }
+                                th { class: "num", "Time" }
+                                th { "Uma" }
+                                th { "Skill" }
+                                th { class: "num", "Distance" }
+                            }
+                        }
+                        tbody {
+                            for a in acts {
+                                tr {
+                                    td { class: "num", "{ft(a.time)}" }
+                                    td { class: "who", {who(res, names, a.horse)} }
+                                    td { SkillX { id: a.skill_id } }
+                                    td { class: "num", "{a.distance:.0} m" }
+                                }
                             }
                         }
                     }

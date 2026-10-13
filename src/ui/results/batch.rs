@@ -143,7 +143,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
             }
         }
         if let Some(i) = f.filter(|&i| i < n) {
-            {horse_detail(s, res, names, i, cur, base, diffs.as_ref().map(|d| &d[i]))}
+            {horse_detail(s, res, i, cur, base, diffs.as_ref().map(|d| &d[i]))}
         }
     }
 }
