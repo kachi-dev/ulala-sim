@@ -18,24 +18,34 @@ pub fn TitleBar() -> Element {
     let w = use_window();
     let mut maximized = use_signal(|| w.is_maximized());
     let mut last_down = use_signal(|| None::<Instant>);
-    // Window size to remember: the restored size, kept while maximized.
+    // Window bounds to remember: the normal size and position, kept while maximized or minimized.
     let saved = use_hook(load_window);
     let mut size = use_signal(|| saved);
-    // Track maximize however it changes (buttons, Win+Up, snapping), and the size.
+    // Track maximize however it changes (buttons, Win+Up, snapping), and the bounds.
     use_wry_event_handler(move |event, _| {
-        if let Event::WindowEvent { event: WindowEvent::Resized(_), .. } = event {
-            let max = w.is_maximized();
+        if let Event::WindowEvent { event: WindowEvent::Resized(_) | WindowEvent::Moved(_), .. } = event {
+            #[cfg(windows)]
+            let (max, min) = {
+                use dioxus::desktop::tao::platform::windows::WindowExtWindows;
+                crate::chrome_win::state(w.hwnd())
+            };
+            #[cfg(not(windows))]
+            let (max, min) = (w.is_maximized(), w.is_minimized());
             if *maximized.peek() != max {
                 maximized.toggle();
             }
             let cur = *size.peek();
-            let (width, height) = if max || w.is_minimized() {
-                cur.map_or((0.0, 0.0), |c| (c.width, c.height))
+            let (width, height, x, y) = if max || min {
+                cur.map_or((0.0, 0.0, None, None), |c| (c.width, c.height, c.x, c.y))
             } else {
-                w.inner_size().to_logical::<f64>(w.scale_factor()).into()
+                let (width, height) = w.inner_size().to_logical::<f64>(w.scale_factor()).into();
+                let p = w.outer_position().ok().map(|p| p.to_logical::<f64>(w.scale_factor()));
+                (width, height, p.map(|p| p.x), p.map(|p| p.y))
             };
             if width > 0.0 {
-                size.set(Some(WindowSize { width, height, maximized: max }));
+                // Minimized keeps whether it was maximized, so it comes back the way it was.
+                let maximized = if min { cur.is_some_and(|c| c.maximized) } else { max };
+                size.set(Some(WindowSize { width, height, maximized, x, y }));
             }
         }
     });

@@ -7,7 +7,7 @@ use windows::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
 use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, IsZoomed, SIZE_RESTORED, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+    GetClientRect, IsIconic, IsZoomed, SIZE_RESTORED, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
     SWP_NOZORDER, SendMessageW, SetWindowPos, WM_NCCALCSIZE, WM_SIZE,
 };
 
@@ -35,6 +35,14 @@ pub fn apply(hwnd: isize) {
             SendMessageW(hwnd, WM_SIZE, Some(WPARAM(SIZE_RESTORED as usize)), Some(LPARAM((w | (h << 16)) as isize)));
         }
     }
+}
+
+/// (maximized, minimized) straight from Windows. tao's flags lag the move and size events of a maximize or minimize,
+/// which would otherwise be taken for the window's normal bounds.
+pub fn state(hwnd: isize) -> (bool, bool) {
+    let hwnd = HWND(hwnd as *mut _);
+    // SAFETY: read-only queries on the app's live top-level window.
+    unsafe { (IsZoomed(hwnd).as_bool(), IsIconic(hwnd).as_bool()) }
 }
 
 unsafe extern "system" fn subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {

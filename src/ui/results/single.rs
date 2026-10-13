@@ -1,13 +1,14 @@
-//! Single-run results: finish table, then every uma's positions over the course and skill activations, or the
-//! focused uma's detail (Summary: over the course with events; Skills: activations and misses).
+//! Single-run results: the result card (Summary: finish table; More: every uma's positions over the course and skill
+//! activations), and the focused uma's detail (Summary: over the course with events; Skills: activations and misses).
 
 use super::*;
 use super::detail::{UmaLinks, UmaPick};
 use crate::charts::*;
 
 pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Option<&Run>) -> Element {
-    let (mut focus, mut detail_tab) = (s.focus, s.detail_tab);
-    let tab = *detail_tab.read();
+    let (mut focus, mut detail_tab, mut run_tab) = (s.focus, s.detail_tab, s.run_tab);
+    // x1000's third tab (Stamina) has no Run once counterpart: Summary.
+    let (tab, rtab) = (if *detail_tab.read() == 1 { 1 } else { 0 }, *run_tab.read());
     let n = cur.horses.len();
     let f = (*focus.read()).filter(|&f| f < n);
     let diffs = base.map(|b| diff_runs(b, cur));
@@ -39,19 +40,6 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
         }
     };
 
-    let strip: Vec<(String, String, Vec<f32>)> = (0..n)
-        .filter(|&i| f.is_none_or(|f| f == i))
-        .map(|i| {
-            let d = cur.activations.iter().filter(|a| a.horse == i).map(|a| a.distance).collect();
-            (names[i].clone(), if f.is_some() { "var(--accent)".to_string() } else { res.colors[i].clone() }, d)
-        })
-        .collect();
-    let acts: Vec<&Activation> = cur.activations.iter().filter(|a| f.is_none_or(|f| f == a.horse)).collect();
-    let missed: Vec<(usize, &SkillCheck)> = (0..n)
-        .filter(|&i| f.is_none_or(|f| f == i))
-        .flat_map(|i| cur.horses[i].skills.iter().filter(|c| c.outcome != SkillOutcome::Activated).map(move |c| (i, c)))
-        .collect();
-    let all = f.is_none() && n > 1;
     let cv = &res.cv;
     let style = match (f, s.race.cloned()) {
         (Some(f), Some(race)) => format!("{} · seed {}", style_name(&race, &res.input.horses[f]), cur.seed),
@@ -65,113 +53,107 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                 span { class: "muted", "seed {cur.seed} · click a row to focus an uma" }
                 if improved { img { class: "great", src: "/a/great.webp", alt: "Great!" } }
             }
-            div { class: "scroll-x",
-                table { class: "grid results",
-                    thead {
-                        tr {
-                            th { "Place" }
-                            th { "Uma" }
-                            th { class: "num", "Time" }
-                            th { class: "num c-behind", "Behind" }
-                            th { title: "Delay: metres after the final-leg start. Speed: the spurt's target speed (m/s), and how far below max spurt speed when slowed", "Last spurt" }
-                            th { "HP" }
-                            for e in EVENTS.iter() { th { class: "num", title: "{e.hint}. Seconds in this race.", "{e.label}" } }
-                            if base.is_some() { th { "Activations gained / lost" } }
+            div { class: "seg small dtabs",
+                for (k, label) in ["Summary", "More"].into_iter().enumerate() {
+                    button { class: if rtab == k { "on" }, onclick: move |_| run_tab.set(k), "{label}" }
+                }
+            }
+            if rtab == 0 {
+                div { class: "scroll-x",
+                    table { class: "grid results",
+                        thead {
+                            tr {
+                                th { "Place" }
+                                th { "Uma" }
+                                th { class: "num", "Time" }
+                                th { class: "num c-behind", "Behind" }
+                                th { class: "num", title: "✓ full spurt: on time and at max speed. ✗ (+metres late after the final-leg start, -m/s below max spurt speed)", "Last spurt" }
+                                th { class: "num", "HP" }
+                                for e in EVENTS.iter() { th { class: "num", title: "{e.hint}. Seconds in this race.", "{e.label}" } }
+                                if base.is_some() { th { "Activations gained / lost" } }
+                            }
                         }
-                    }
-                    tbody {
-                        for i in order {
-                            {
-                                let h = &cur.horses[i];
-                                let d = diffs.as_ref().map(|d| &d[i]);
-                                let card = res.input.horses[i].card_id;
-                                rsx! {
-                                    tr {
-                                        key: "{i}",
-                                        class: if f == Some(i) { "sel" },
-                                        onclick: move |_| if f == Some(i) { focus.set(None) } else { focus_gate(s, i, card) },
-                                        td { class: "place",
-                                            b { "{h.place}" }
-                                            if let Some(d) = d {
-                                                if d.place.0 != d.place.1 {
-                                                    {delta(d.place.0 as f32 - d.place.1 as f32, false, d.place.0.abs_diff(d.place.1).to_string())}
-                                                }
-                                            }
-                                        }
-                                        td { class: "who", {who(res, names, i)} }
-                                        td { class: "num",
-                                            "{ft(h.finish_time)}"
-                                            if let Some(d) = d {
-                                                if (d.finish_time.1 - d.finish_time.0).abs() > 1e-4 {
-                                                    div { {time_delta(d.finish_time.1 - d.finish_time.0)} }
-                                                    div { {len_delta(d.lengths)} }
-                                                }
-                                            }
-                                        }
-                                        td { class: "num muted c-behind",
-                                            if h.place > 1 {
-                                                "+{h.behind:.2}s · {h.behind_lengths:.1} L"
-                                                // The game's margin: finish time gap to the horse in front × 15 m/s, in lengths.
-                                                div { class: "margin", title: "Margin to the uma in front, as the game shows it", "{margin_label((h.finish_time - ahead_of(cur, h.place)) * 15.0 / 2.5)}" }
-                                            }
-                                        }
-                                        td {
-                                            if h.spurt_kind == 4 {
-                                                span { class: "no", "No spurt" }
-                                            } else {
-                                                div { "Delay: " span { class: if h.spurt_kind & 1 == 1 { "no" } else { "ok" }, "{h.spurt_delay:.2}m" } }
-                                                div {
-                                                    "Speed: "
-                                                    span { class: if h.spurt_kind & 2 == 2 { "no" } else { "ok" },
-                                                        "{h.spurt_speed:.2}"
-                                                        if h.spurt_kind & 2 == 2 { " (-{h.max_spurt_speed - h.spurt_speed:.2})" }
+                        tbody {
+                            for i in order {
+                                {
+                                    let h = &cur.horses[i];
+                                    let d = diffs.as_ref().map(|d| &d[i]);
+                                    let card = res.input.horses[i].card_id;
+                                    rsx! {
+                                        tr {
+                                            key: "{i}",
+                                            class: if f == Some(i) { "sel" },
+                                            onclick: move |_| if f == Some(i) { focus.set(None) } else { focus_gate(s, i, card) },
+                                            td { class: "place",
+                                                b { "{h.place}" }
+                                                if let Some(d) = d {
+                                                    if d.place.0 != d.place.1 {
+                                                        {delta(d.place.0 as f32 - d.place.1 as f32, false, d.place.0.abs_diff(d.place.1).to_string())}
                                                     }
                                                 }
                                             }
-                                            if let Some(d) = d {
-                                                if (d.spurt_delay.0 - d.spurt_delay.1).abs() > 0.005 || (d.spurt_speed.0 - d.spurt_speed.1).abs() > 0.005 {
-                                                    div { class: "was", "was {d.spurt_delay.0:.2}m · {d.spurt_speed.0:.2}" }
+                                            td { class: "who", {who(res, names, i)} }
+                                            td { class: "num",
+                                                "{ft(h.finish_time)}"
+                                                if let Some(d) = d {
+                                                    if (d.finish_time.1 - d.finish_time.0).abs() > 1e-4 {
+                                                        div { {time_delta(d.finish_time.1 - d.finish_time.0)} }
+                                                        div { {len_delta(d.lengths)} }
+                                                    }
                                                 }
                                             }
-                                        }
-                                        td {
-                                            if h.hp_out {
-                                                div { class: "no", "Died" }
-                                                if let Some(at) = h.hp_out_at { div { class: "small no", title: "Ran out of stamina this far before the goal", "-{cur.goal - at:.0}m" } }
-                                            } else {
-                                                div { class: "ok", "Survived" }
-                                                div { "{h.hp_at_goal:.0} HP" }
-                                            }
-                                            if let Some(d) = d {
-                                                if (d.hp_at_goal.0 - d.hp_at_goal.1).abs() > 0.5 {
-                                                    div { class: "was", "was {d.hp_at_goal.0:.0} HP" }
+                                            td { class: "num muted c-behind",
+                                                if h.place > 1 {
+                                                    "+{h.behind:.2}s · {h.behind_lengths:.1} L"
+                                                    // The game's margin: finish time gap to the horse in front × 15 m/s, in lengths.
+                                                    div { class: "margin", title: "Margin to the uma in front, as the game shows it", "{margin_label((h.finish_time - ahead_of(cur, h.place)) * 15.0 / 2.5)}" }
                                                 }
                                             }
-                                        }
-                                        for e in EVENTS.iter() {
-                                            {
-                                                let (kind, more_good) = (e.kind, e.more_good);
-                                                let t = h.state_time[kind as usize];
-                                                rsx! {
-                                                    td { class: "num",
-                                                        if t > 0.0 { "{t:.1}s" } else { span { class: "muted", "-" } }
-                                                        if let Some(b) = base {
-                                                            {
-                                                                let was = b.horses[i].state_time[kind as usize];
-                                                                state_arrow(was, t, 0.05, more_good, format!("was {was:.1}s"))
+                                            td { class: "num",
+                                                {
+                                                    let (ok, label) = spurt_label(h);
+                                                    let was = base.map(|b| spurt_label(&b.horses[i]).1).filter(|w| *w != label);
+                                                    rsx! {
+                                                        span { class: if ok { "ok nowrap" } else { "no nowrap" }, "{label}" }
+                                                        if let Some(w) = was { div { class: "was", "was {w}" } }
+                                                    }
+                                                }
+                                            }
+                                            td { class: "num",
+                                                {
+                                                    let label = hp_label(h, cur.goal);
+                                                    let was = base.map(|b| hp_label(&b.horses[i], b.goal)).filter(|w| *w != label);
+                                                    rsx! {
+                                                        span { class: if h.hp_out { "no nowrap" } else { "ok nowrap" }, title: "Died: ran out of HP this far before the goal", "{label}" }
+                                                        if let Some(w) = was { div { class: "was", "was {w}" } }
+                                                    }
+                                                }
+                                            }
+                                            for e in EVENTS.iter() {
+                                                {
+                                                    let (kind, more_good) = (e.kind, e.more_good);
+                                                    let t = h.state_time[kind as usize];
+                                                    rsx! {
+                                                        td { class: "num",
+                                                            if t > 0.0 { "{t:.1}s" } else { span { class: "muted", "-" } }
+                                                            if let Some(b) = base {
+                                                                {
+                                                                    let was = b.horses[i].state_time[kind as usize];
+                                                                    state_arrow(was, t, 0.05, more_good, format!("was {was:.1}s"))
+                                                                }
                                                             }
                                                         }
                                                     }
                                                 }
                                             }
-                                        }
-                                        if let Some(d) = d {
-                                            td { class: "skills",
-                                                for id in d.skills_gained.iter() {
-                                                    SkillX { id: *id, extra: "added" }
-                                                }
-                                                for id in d.skills_lost.iter() {
-                                                    SkillX { id: *id, extra: "removed" }
+                                            if let Some(d) = d {
+                                                td { class: "skills",
+                                                    for id in d.skills_gained.iter() {
+                                                        SkillX { id: *id, extra: "added" }
+                                                    }
+                                                    for id in d.skills_lost.iter() {
+                                                        SkillX { id: *id, extra: "removed" }
+                                                    }
                                                 }
                                             }
                                         }
@@ -181,6 +163,11 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                         }
                     }
                 }
+            } else {
+                h4 { "Over the course" span { class: "muted small", if n > 1 { " (positions of every uma" } if base.is_some() && ed.iter().any(|&m| m) { ", edited ones on top with the baseline dashed" } if n > 1 { ")" } } }
+                PlaceChart { series, field_size: n, markers: vec![(cv.final_leg_start / cv.distance * 100.0, "Late race".to_string())] }
+                h4 { "Skill activations" span { class: "muted small", " (every uma)" } }
+                {activations(res, names, cur, None)}
             }
         }
         if let Some(f) = f {
@@ -198,53 +185,7 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                     }
                 }
                 if tab == 1 {
-                    CourseStrip { rows: strip, course_distance: cv.distance, final_leg_start: cv.final_leg_start }
-                    if !missed.is_empty() {
-                        details { class: "acts", open: true,
-                            summary { "{missed.len()} skill" if missed.len() != 1 { "s" } " didn't activate" }
-                            table { class: "grid",
-                                thead {
-                                    tr {
-                                        if all { th { "Uma" } }
-                                        th { "Skill" }
-                                        th { "Reason" }
-                                    }
-                                }
-                                tbody {
-                                    for (i, c) in missed {
-                                        tr {
-                                            if all { td { class: "who", {who(res, names, i)} } }
-                                            td { SkillX { id: c.skill_id } }
-                                            td { {why(c, &cur.horses[i], cur.goal, n)} }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    details { class: "acts",
-                        summary { "{acts.len()} activations" }
-                        table { class: "grid",
-                            thead {
-                                tr {
-                                    th { class: "num", "Time" }
-                                    th { "Uma" }
-                                    th { "Skill" }
-                                    th { class: "num", "Distance" }
-                                }
-                            }
-                            tbody {
-                                for a in acts {
-                                    tr {
-                                        td { class: "num", "{ft(a.time)}" }
-                                        td { class: "who", {who(res, names, a.horse)} }
-                                        td { SkillX { id: a.skill_id } }
-                                        td { class: "num", "{a.distance:.0} m" }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    {activations(res, names, cur, Some(f))}
                 } else {
                     h4 { "Over the course" }
                     RaceChart {
@@ -260,63 +201,71 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                     }
                 }
             }
-        } else {
-            section { class: "card",
-                div { class: "card-h",
-                    h3 { "Over the course" }
-                    span { class: "muted", if n > 1 { "positions of every uma" } if base.is_some() && ed.iter().any(|&m| m) { ", edited ones on top with the baseline dashed" } }
-                }
-                PlaceChart { series, field_size: n, markers: vec![(cv.final_leg_start / cv.distance * 100.0, "Late race".to_string())] }
-            }
-            section { class: "card",
-                div { class: "card-h",
-                    h3 { "Skill activations" }
-                    span { class: "muted", "all umas, click a result row to focus one" }
-                }
-                CourseStrip { rows: strip, course_distance: cv.distance, final_leg_start: cv.final_leg_start }
-                if !missed.is_empty() {
-                    details { class: "acts", open: n == 1,
-                        summary { "{missed.len()} skill" if missed.len() != 1 { "s" } " didn't activate" }
-                        table { class: "grid",
-                            thead {
-                                tr {
-                                    if all { th { "Uma" } }
-                                    th { "Skill" }
-                                    th { "Reason" }
-                                }
-                            }
-                            tbody {
-                                for (i, c) in missed {
-                                    tr {
-                                        if all { td { class: "who", {who(res, names, i)} } }
-                                        td { SkillX { id: c.skill_id } }
-                                        td { {why(c, &cur.horses[i], cur.goal, n)} }
-                                    }
-                                }
+        }
+    }
+}
+
+/// Skill activations of uma `only` (None: every uma): where along the course, what didn't activate and why, and the
+/// activations in time order.
+fn activations(res: &Res, names: &[String], cur: &Run, only: Option<usize>) -> Element {
+    let n = cur.horses.len();
+    let cv = &res.cv;
+    let strip: Vec<(String, String, Vec<f32>)> = (0..n)
+        .filter(|&i| only.is_none_or(|f| f == i))
+        .map(|i| {
+            let d = cur.activations.iter().filter(|a| a.horse == i).map(|a| a.distance).collect();
+            (names[i].clone(), if only.is_some() { "var(--accent)".to_string() } else { res.colors[i].clone() }, d)
+        })
+        .collect();
+    let acts: Vec<&Activation> = cur.activations.iter().filter(|a| only.is_none_or(|f| f == a.horse)).collect();
+    let missed: Vec<(usize, &SkillCheck)> = (0..n)
+        .filter(|&i| only.is_none_or(|f| f == i))
+        .flat_map(|i| cur.horses[i].skills.iter().filter(|c| c.outcome != SkillOutcome::Activated).map(move |c| (i, c)))
+        .collect();
+    let all = only.is_none() && n > 1;
+    rsx! {
+        CourseStrip { rows: strip, course_distance: cv.distance, final_leg_start: cv.final_leg_start }
+        if !missed.is_empty() {
+            details { class: "acts", open: !all,
+                summary { "{missed.len()} skill" if missed.len() != 1 { "s" } " didn't activate" }
+                table { class: "grid",
+                    thead {
+                        tr {
+                            if all { th { "Uma" } }
+                            th { "Skill" }
+                            th { "Reason" }
+                        }
+                    }
+                    tbody {
+                        for (i, c) in missed {
+                            tr {
+                                if all { td { class: "who", {who(res, names, i)} } }
+                                td { SkillX { id: c.skill_id } }
+                                td { {why(c, &cur.horses[i], cur.goal, n)} }
                             }
                         }
                     }
                 }
-                details { class: "acts",
-                    summary { "{acts.len()} activations" }
-                    table { class: "grid",
-                        thead {
-                            tr {
-                                th { class: "num", "Time" }
-                                th { "Uma" }
-                                th { "Skill" }
-                                th { class: "num", "Distance" }
-                            }
-                        }
-                        tbody {
-                            for a in acts {
-                                tr {
-                                    td { class: "num", "{ft(a.time)}" }
-                                    td { class: "who", {who(res, names, a.horse)} }
-                                    td { SkillX { id: a.skill_id } }
-                                    td { class: "num", "{a.distance:.0} m" }
-                                }
-                            }
+            }
+        }
+        details { class: "acts",
+            summary { "{acts.len()} activations" }
+            table { class: "grid",
+                thead {
+                    tr {
+                        th { class: "num", "Time" }
+                        th { "Uma" }
+                        th { "Skill" }
+                        th { class: "num", "Distance" }
+                    }
+                }
+                tbody {
+                    for a in acts {
+                        tr {
+                            td { class: "num", "{ft(a.time)}" }
+                            td { class: "who", {who(res, names, a.horse)} }
+                            td { SkillX { id: a.skill_id } }
+                            td { class: "num", "{a.distance:.0} m" }
                         }
                     }
                 }
@@ -345,6 +294,33 @@ fn why(c: &SkillCheck, h: &HorseRun, goal: f32, n: usize) -> Element {
             b { "{head}" }
             div { class: "muted small", "{detail}" }
         }
+    }
+}
+
+/// "✓" for a full spurt, else "✗ (+metres late, -m/s below max)" with only what fell short, or "✗ (no spurt)".
+fn spurt_label(h: &HorseRun) -> (bool, String) {
+    match h.spurt_kind {
+        0 => (true, "✓".into()),
+        4 => (false, "✗ (no spurt)".into()),
+        k => {
+            let mut parts = vec![];
+            if k & 1 == 1 {
+                parts.push(format!("+{:.1}m", h.spurt_delay));
+            }
+            if k & 2 == 2 {
+                parts.push(format!("-{:.2}", h.max_spurt_speed - h.spurt_speed));
+            }
+            (false, format!("✗ ({})", parts.join(", ")))
+        }
+    }
+}
+
+/// "Survived", or "Died -24m" (how far before the goal HP ran out).
+fn hp_label(h: &HorseRun, goal: f32) -> String {
+    match (h.hp_out, h.hp_out_at) {
+        (false, _) => "Survived".into(),
+        (true, Some(at)) => format!("Died -{:.0}m", goal - at),
+        (true, None) => "Died".into(),
     }
 }
 

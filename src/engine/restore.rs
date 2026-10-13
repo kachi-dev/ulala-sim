@@ -1,4 +1,4 @@
-//! What survives a restart, in `%LOCALAPPDATA%/ulala/`: the window size (window.json) and the race being worked on
+//! What survives a restart, in `%LOCALAPPDATA%/ulala/`: the window bounds (window.json) and the race being worked on
 //! (session.json): its save (None = custom), the setup, trainer names and the pinned baseline.
 
 use std::path::{Path, PathBuf};
@@ -8,12 +8,17 @@ use uma_race_sim::api::{HorseInput, RaceInput, SkillInput};
 
 use super::{Race, app_dir, load_race, new_race};
 
-/// Window size in logical px (the size it restores to when maximized).
+/// Window bounds in logical px: the normal (not maximized or minimized) size and top-left, which it restores to.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 pub struct WindowSize {
     pub width: f64,
     pub height: f64,
     pub maximized: bool,
+    /// None in files from before positions were kept: placed centered.
+    #[serde(default)]
+    pub x: Option<f64>,
+    #[serde(default)]
+    pub y: Option<f64>,
 }
 
 pub fn load_window() -> Option<WindowSize> {

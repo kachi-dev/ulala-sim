@@ -7,10 +7,6 @@ use super::{Batch, Dist, Run, dist, gap_lengths};
 pub struct RunDiff {
     pub place: (usize, usize),
     pub finish_time: (f32, f32),
-    pub spurt_delay: (f32, f32),
-    pub spurt_speed: (f32, f32),
-    pub full_spurt: (bool, bool),
-    pub hp_at_goal: (f32, f32),
     /// Skills that activated only in the baseline / only in the edited run.
     pub skills_lost: Vec<i32>,
     pub skills_gained: Vec<i32>,
@@ -35,10 +31,6 @@ pub fn diff_runs(a: &Run, b: &Run) -> Vec<RunDiff> {
             RunDiff {
                 place: (x.place, y.place),
                 finish_time: (x.finish_time, y.finish_time),
-                spurt_delay: (x.spurt_delay, y.spurt_delay),
-                spurt_speed: (x.spurt_speed, y.spurt_speed),
-                full_spurt: (x.full_spurt, y.full_spurt),
-                hp_at_goal: (x.hp_at_goal, y.hp_at_goal),
                 skills_lost: minus(&ia, &ib),
                 skills_gained: minus(&ib, &ia),
                 lengths: gap_lengths(&b.out.frames, &a.out.frames, h, a.goal),

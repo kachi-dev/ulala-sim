@@ -39,8 +39,8 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                             th { class: "num", "Win" }
                             th { class: "num", "Avg place" }
                             th { class: "c-hist", "Places 1 to {n}" }
-                            th { title: "Means over races with a spurt. Delay: metres after the final-leg start. Speed: the spurt's target speed (m/s), and how far below max spurt speed. Full spurt: on time and at max speed.", "Last spurt (mean)" }
-                            th { title: "Share of races that kept HP to the goal, mean HP at the goal; share that ran out, mean metres before the goal", "HP (mean)" }
+                            th { class: "num", title: "Share of races with a full spurt: on time and at max speed", "Last spurt" }
+                            th { class: "num", title: "Share of races that kept HP to the goal; share that ran out, mean metres before the goal", "HP" }
                             for e in EVENTS.iter() { th { class: "num", title: "{e.hint}. Share of races it happened in, mean seconds when it did.", "{e.label}" } }
                         }
                     }
@@ -73,7 +73,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                                             }
                                         }
                                         td { class: "c-hist", {mini_hist(&h.place_hist)} }
-                                        td {
+                                        td { class: "num",
                                             div { title: "Full spurt: on time and at max speed",
                                                 b { "{pct(h.full_spurt_rate)}" }
                                                 if let Some(d) = d {
@@ -83,26 +83,8 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                                                     }
                                                 }
                                             }
-                                            if h.spurt_delays.is_empty() {
-                                                span { class: "no", "No spurt" }
-                                            } else {
-                                                {
-                                                    let delay = dist(h.spurt_delays.clone()).mean;
-                                                    let slow = h.spurt_slow >= 0.005;
-                                                    rsx! {
-                                                        div { "Delay: " span { class: if delay > SPURT_ON_TIME_M { "no" } else { "ok" }, "{delay:.2}m" } }
-                                                        div {
-                                                            "Speed: "
-                                                            span { class: if slow { "no" } else { "ok" },
-                                                                "{h.spurt_speed:.2}"
-                                                                if slow { " (-{h.spurt_slow:.2})" }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
                                         }
-                                        td {
+                                        td { class: "num",
                                             if h.hp_out_rate < 1.0 {
                                                 div { class: "ok", "Survived" if h.hp_out_rate > 0.0 { " {pct(1.0 - h.hp_out_rate)}" } }
                                             }
@@ -111,9 +93,6 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                                                     "Died" if h.hp_out_rate < 1.0 { " {pct(h.hp_out_rate)}" }
                                                     if !h.hp_out_distances.is_empty() { " (-{res.cv.distance - dist(h.hp_out_distances.clone()).mean:.0}m)" }
                                                 }
-                                            }
-                                            if h.hp_out_rate < 1.0 {
-                                                div { "{h.hp_at_goal.mean:.0} HP" }
                                             }
                                         }
                                         for e in EVENTS.iter() {
