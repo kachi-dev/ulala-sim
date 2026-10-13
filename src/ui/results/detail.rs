@@ -32,9 +32,9 @@ pub(super) fn horse_detail(
     let Some(race) = s.race.cloned() else { return rsx! {} };
     let (mut focus, mut skill_sel, mut detail_tab) = (s.focus, s.skill_sel, s.detail_tab);
     // The Wit subtab only for an uma whose Wit differs from the baseline's.
+    // The Wit subtab's length calculation, only for an uma whose Wit differs from the baseline's.
     let old_wiz = base.and_then(|_| crate::ui::wit::old_wit(s, &res.input, i));
-    let tabs = if old_wiz.is_some() { &["Summary", "Skills", "Stamina", "Wit"][..] } else { &["Summary", "Skills", "Stamina"][..] };
-    let tab = (*detail_tab.read()).min(tabs.len() - 1);
+    let tab = *detail_tab.read();
     let h = &cur.horses[i];
     let b = base.map(|b| &b.horses[i]);
     // Charts of one uma: the accent; her team / gate colour stays on her icon.
@@ -85,7 +85,7 @@ pub(super) fn horse_detail(
             }
             div { class: "dtabs-row",
                 div { class: "seg small dtabs",
-                    for (k, &label) in tabs.iter().enumerate() {
+                    for (k, label) in ["Summary", "Skills", "Stamina", "Wit"].into_iter().enumerate() {
                         button {
                             class: if tab == k { "on" },
                             onclick: move |_| {
@@ -154,8 +154,11 @@ pub(super) fn horse_detail(
             if tab == 2 {
                 {spurt_and_hp(h, cv, &color)}
             }
-            if let (3, Some(old)) = (tab, old_wiz) {
-                crate::ui::wit::WitOut { i, old }
+            if tab == 3 {
+                {crate::ui::wit::wit_cards(h, b, diff)}
+                if let Some(old) = old_wiz {
+                    crate::ui::wit::WitOut { i, old }
+                }
             }
             if tab == 1 {
                 div { class: "olegend muted small",

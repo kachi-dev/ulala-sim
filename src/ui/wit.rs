@@ -34,7 +34,60 @@ fn box_stats(v: &[WitPair]) -> [f32; 6] {
     [d.p10, d.p25, d.p50, d.p75, d.p90, d.mean]
 }
 
-/// Horse `i` of the batch on screen, whose baseline Wit was `old`: the Simulate button (beside the detail's subtabs).
+/// Horse `h` of the batch vs `b`, the same uma on the baseline (when there is one): lengths, full spurt, rushed and time in
+/// the Wit-driven modes, straight from the two batches.
+pub(super) fn wit_cards(h: &HorseStats, b: Option<&HorseStats>, diff: Option<&BatchDiff>) -> Element {
+    let rushed = |x: &HorseStats| x.states[uma_race_sim::api::span_kind::RUSHED as usize].0;
+    // Mean seconds per race in `WIT_MODES[m]` (`states` holds the share of races and the mean over those).
+    let secs = |x: &HorseStats, m: usize| {
+        let (share, s) = x.states[WIT_MODES[m].0 as usize];
+        share * s
+    };
+    // "old → new", or just the value without a baseline.
+    let val = |f: &dyn Fn(&HorseStats) -> f32, fmt: &dyn Fn(f32) -> String| match b {
+        Some(b) => format!("{} → {}", fmt(f(b)), fmt(f(h))),
+        None => fmt(f(h)),
+    };
+    let ch = |f: &dyn Fn(&HorseStats) -> f32, lower_better: bool, txt: &dyn Fn(f32) -> String| {
+        b.map(|b| {
+            let d = f(h) - f(b);
+            delta(d, lower_better, txt(d.abs()))
+        })
+    };
+    let pp = |v: f32| format!("{:.1} pp", v * 100.0);
+    let s2 = |v: f32| format!("{v:.2} s");
+    // More downhill accel is good; the position keep modes are neither.
+    let mode_ch = |m: usize| -> Option<Element> {
+        let d = secs(h, m) - secs(b?, m);
+        Some(if m == 0 { delta(d, false, s2(d.abs())) } else { rsx! { span { class: "d flat", "{d:+.2} s" } } })
+    };
+    // Modes the uma is ever in (a Front runner never paces up or down, the others never speed up or overtake).
+    let used: Vec<usize> = (0..WIT_MODES.len()).filter(|&m| secs(h, m) > 0.0 || b.is_some_and(|b| secs(b, m) > 0.0)).collect();
+    // Mean lengths vs the baseline and its 95% range.
+    let lengths = diff.map(|d| {
+        let n = d.length_deltas.len().max(2) as f32;
+        let sd = (d.length_deltas.iter().map(|l| (l - d.lengths.mean).powi(2)).sum::<f32>() / (n - 1.0)).sqrt();
+        (d.lengths.mean, 1.96 * sd / n.sqrt())
+    });
+    rsx! {
+        div { class: "kpis",
+            if let Some((l, ci)) = lengths {
+                div { b { "{l:+.2} L" } div { class: "kpi2", span { "lengths" } span { title: "95% range of the mean", "{l - ci:+.2} to {l + ci:+.2}" } } }
+            }
+            div { b { {val(&|x| x.full_spurt_rate, &|v| pct(v))} } div { class: "kpi2", span { "full spurt" } {ch(&|x| x.full_spurt_rate, false, &pp)} } }
+            div { b { {val(&rushed, &|v| pct(v))} } div { class: "kpi2", span { "rushed" } {ch(&rushed, true, &pp)} } }
+            for m in used {
+                div { key: "{m}",
+                    b { {val(&|x| secs(x, m), &|v| format!("{v:.2}"))} " s" }
+                    div { class: "kpi2", span { "{WIT_MODES[m].1.to_lowercase()}" } {mode_ch(m)} }
+                }
+            }
+        }
+    }
+}
+
+/// Horse `i` of the batch on screen, whose baseline Wit was `old`: the length calculation's button (beside the
+/// detail's subtabs).
 #[component]
 pub(super) fn WitRun(i: usize, old: i32) -> Element {
     let s = use_context::<S>();
@@ -64,7 +117,7 @@ pub(super) fn WitRun(i: usize, old: i32) -> Element {
         });
     };
     rsx! {
-        button { class: "btn small", disabled: running(), onclick: start, "Simulate {thousands(n)} races" }
+        button { class: "btn small", disabled: running(), onclick: start, "Calculate length differences" }
         span { class: "chip", "Wit {old} → {new}" }
         span { class: "muted small", "{thousands(runs)} races, {eta}" }
         Progress {}
@@ -90,7 +143,6 @@ fn WitResults(r: WitRes) -> Element {
     let stale = use_stale(s, move || Some(rev));
     let rows = &r.wit.rows;
     let all = &rows[WIT_MECHANICS.len()];
-    let full = |v: &[WitPair]| means(v, |x| x.full_spurt as u8 as f32);
     let rushed = |v: &[WitPair]| means(v, |x| x.rushed as u8 as f32);
     let skills = |v: &[WitPair]| means(v, |x| x.skills as f32);
     let secs = |v: &[WitPair], m: usize| means(v, |x| x.modes[m]);
@@ -106,10 +158,6 @@ fn WitResults(r: WitRes) -> Element {
     let pk: Vec<usize> = used.iter().copied().filter(|&m| m > 0).collect();
     // `(old, new)` as "▲ 3.8 pp".
     let pp = |(o, n): (f32, f32), lower_better: bool| delta(n - o, lower_better, format!("{:.1} pp", (n - o).abs() * 100.0));
-    let total = gain(all);
-    // 95% range of the mean.
-    let sd = (all.iter().map(|p| (p.gain - total).powi(2)).sum::<f32>() / (all.len().max(2) - 1) as f32).sqrt();
-    let ci = 1.96 * sd / (all.len().max(1) as f32).sqrt();
     // Mechanics by mean gain, most first.
     let mut order: Vec<usize> = (0..WIT_MECHANICS.len()).collect();
     order.sort_by(|&a, &b| gain(&rows[b]).total_cmp(&gain(&rows[a])));
@@ -145,22 +193,9 @@ fn WitResults(r: WitRes) -> Element {
             _ => rsx! { span { class: "muted", "-" } },
         }
     };
-    let (fo, fnew) = full(all);
-    let (ro, rn) = rushed(all);
     rsx! {
         if stale() {
             div { class: "stale", "The setup changed since this run. Simulate again to update it." }
-        }
-        div { class: "kpis",
-            div { b { "{total:+.2} L" } div { class: "kpi2", span { "lengths" } span { title: "95% range of the mean", "{total - ci:+.2} to {total + ci:+.2}" } } }
-            div { b { "{pct(fo)} → {pct(fnew)}" } div { class: "kpi2", span { "full spurt" } {pp(full(all), false)} } }
-            div { b { "{pct(ro)} → {pct(rn)}" } div { class: "kpi2", span { "rushed" } {pp(rushed(all), true)} } }
-            for &m in used.iter() {
-                div { key: "{m}",
-                    b { "{secs(all, m).0:.2} → {secs(all, m).1:.2} s" }
-                    div { class: "kpi2", span { "{WIT_MODES[m].1.to_lowercase()}" } {change(m, all)} }
-                }
-            }
         }
         h4 { "Lengths gained per mechanic" }
         GainChart { rows: chart }
