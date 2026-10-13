@@ -228,10 +228,12 @@ fn wit_mechanics() {
     input.horses[0].wiz = 1200;
     // The same Wit as the old one: nothing changes.
     let w = wit(&race, &input, 0, 1200, &seeds(1, 4), &Work::default());
-    assert_eq!((w.cur.len(), w.alt.len()), (4, WIT_MECHANICS.len() + 1));
-    assert!(w.alt.iter().flatten().zip(w.cur.iter().cycle()).all(|(a, c)| a.lengths == 0.0 && a.skills == c.skills));
+    assert_eq!(w.rows.len(), WIT_MECHANICS.len() + 1);
+    assert!(w.rows.iter().all(|r| r.len() == 4) && w.rows.iter().flatten().all(|p| p.gain == 0.0 && p.new == p.old));
     // 1200 vs 200: the section rolls move every race, and all at once costs the old Wit lengths on average.
     let w = wit(&race, &input, 0, 200, &seeds(1, 16), &Work::default());
-    assert!(w.alt[0].iter().all(|a| a.lengths != 0.0));
-    assert!(w.alt[WIT_MECHANICS.len()].iter().map(|a| a.lengths).sum::<f32>() > 0.0);
+    assert!(w.rows[0].iter().all(|p| p.gain != 0.0));
+    assert!(w.rows[WIT_MECHANICS.len()].iter().map(|p| p.gain).sum::<f32>() > 0.0);
+    // Every row starts from the same baseline race.
+    assert!(w.rows.iter().all(|r| r.iter().zip(&w.rows[0]).all(|(p, q)| p.old == q.old)));
 }

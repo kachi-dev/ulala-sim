@@ -12,19 +12,25 @@ pub(super) fn old_wit(s: S, input: &RaceInput, i: usize) -> Option<i32> {
     (old != new).then_some(old)
 }
 
-/// Mean of `f` over samples.
-fn mean(v: &[WitSample], f: impl Fn(&WitSample) -> f32) -> f32 {
-    v.iter().map(f).sum::<f32>() / v.len().max(1) as f32
+/// Mean of `f` over the races of `v`: (old Wit, new Wit).
+fn means(v: &[WitPair], f: impl Fn(&WitSample) -> f32) -> (f32, f32) {
+    let n = v.len().max(1) as f32;
+    (v.iter().map(|p| f(&p.old)).sum::<f32>() / n, v.iter().map(|p| f(&p.new)).sum::<f32>() / n)
 }
 
-/// The races `v` changed: lengths != 0 (a pair that never diverged finishes exactly level).
-fn changed(v: &[WitSample]) -> Vec<f32> {
-    v.iter().map(|x| x.lengths).filter(|&l| l != 0.0).collect()
+/// Mean lengths gained.
+fn gain(v: &[WitPair]) -> f32 {
+    v.iter().map(|p| p.gain).sum::<f32>() / v.len().max(1) as f32
 }
 
-/// [p10, p25, p50, p75, p90, mean] of the lengths, for `GainChart`.
-fn box_stats(v: &[WitSample]) -> [f32; 6] {
-    let d = dist(v.iter().map(|x| x.lengths).collect());
+/// The races `v` changed: gain != 0 (a pair that never diverged finishes exactly level).
+fn changed(v: &[WitPair]) -> Vec<f32> {
+    v.iter().map(|p| p.gain).filter(|&l| l != 0.0).collect()
+}
+
+/// [p10, p25, p50, p75, p90, mean] of the gains, for `GainChart`.
+fn box_stats(v: &[WitPair]) -> [f32; 6] {
+    let d = dist(v.iter().map(|p| p.gain).collect());
     [d.p10, d.p25, d.p50, d.p75, d.p90, d.mean]
 }
 
@@ -41,7 +47,7 @@ pub(super) fn WitRun(i: usize, old: i32) -> Element {
         return rsx! {};
     };
     let new = input.horses[i].wiz;
-    // Per seed: as set up, each mechanic on the old Wit, all of them.
+    // Per seed: the baseline, then each mechanic on the new Wit, then all of them.
     let runs = seeds.len() * (WIT_MECHANICS.len() + 2);
     let work = runs * input.horses.len();
     let eta = eta(s, work);
@@ -82,36 +88,37 @@ fn WitResults(r: WitRes) -> Element {
     let mut wsel = s.w_sel;
     let rev = r.rev;
     let stale = use_stale(s, move || Some(rev));
-    let (cur, alt) = (&r.wit.cur, &r.wit.alt);
-    let all = &alt[WIT_MECHANICS.len()];
-    let full = |v: &[WitSample]| mean(v, |x| x.full_spurt as u8 as f32);
-    let rushed = |v: &[WitSample]| mean(v, |x| x.rushed as u8 as f32);
-    let skills = |v: &[WitSample]| mean(v, |x| x.skills as f32);
-    let secs = |v: &[WitSample], m: usize| mean(v, |x| x.modes[m]);
-    // Change in seconds in mode `m` as set up vs `v`. More downhill accel is good; the position keep modes are neither.
-    let change = |m: usize, v: &[WitSample]| -> Element {
-        let d = secs(cur, m) - secs(v, m);
+    let rows = &r.wit.rows;
+    let all = &rows[WIT_MECHANICS.len()];
+    let full = |v: &[WitPair]| means(v, |x| x.full_spurt as u8 as f32);
+    let rushed = |v: &[WitPair]| means(v, |x| x.rushed as u8 as f32);
+    let skills = |v: &[WitPair]| means(v, |x| x.skills as f32);
+    let secs = |v: &[WitPair], m: usize| means(v, |x| x.modes[m]);
+    // Change in seconds in mode `m`, old to new Wit. More downhill accel is good; the position keep modes are neither.
+    let change = |m: usize, v: &[WitPair]| -> Element {
+        let (o, n) = secs(v, m);
+        let d = n - o;
         if m == 0 { delta(d, false, format!("{:.2} s", d.abs())) } else { rsx! { span { class: "d flat", "{d:+.2} s" } } }
     };
-    let mode = |m: usize, v: &[WitSample]| rsx! { "{WIT_MODES[m].1} {secs(cur, m):.2} s " {change(m, v)} };
+    let mode = |m: usize, v: &[WitPair]| rsx! { "{WIT_MODES[m].1} {secs(v, m).1:.2} s " {change(m, v)} };
     // Modes the uma is ever in (a Front runner never paces up or down, the others never speed up or overtake).
-    let used: Vec<usize> = (0..WIT_MODES.len()).filter(|&m| cur.iter().chain(all).any(|x| x.modes[m] > 0.0)).collect();
+    let used: Vec<usize> = (0..WIT_MODES.len()).filter(|&m| all.iter().any(|p| p.new.modes[m] > 0.0 || p.old.modes[m] > 0.0)).collect();
     let pk: Vec<usize> = used.iter().copied().filter(|&m| m > 0).collect();
-    let pp = |a: f32, b: f32, lower_better: bool| delta(a - b, lower_better, format!("{:.1} pp", (a - b).abs() * 100.0));
-    let len = |v: &[WitSample]| mean(v, |x| x.lengths);
-    let total = len(all);
+    // `(old, new)` as "▲ 3.8 pp".
+    let pp = |(o, n): (f32, f32), lower_better: bool| delta(n - o, lower_better, format!("{:.1} pp", (n - o).abs() * 100.0));
+    let total = gain(all);
     // 95% range of the mean.
-    let sd = (all.iter().map(|x| (x.lengths - total).powi(2)).sum::<f32>() / (all.len().max(2) - 1) as f32).sqrt();
+    let sd = (all.iter().map(|p| (p.gain - total).powi(2)).sum::<f32>() / (all.len().max(2) - 1) as f32).sqrt();
     let ci = 1.96 * sd / (all.len().max(1) as f32).sqrt();
     // Mechanics by mean gain, most first.
     let mut order: Vec<usize> = (0..WIT_MECHANICS.len()).collect();
-    order.sort_by(|&a, &b| len(&alt[b]).total_cmp(&len(&alt[a])));
-    let row = |name: &str, color: &str, v: &[WitSample]| (name.to_string(), color.to_string(), box_stats(v), v.len());
-    let mut chart: Vec<(String, String, [f32; 6], usize)> = order.iter().map(|&k| row(WIT_MECHANICS[k], "var(--accent)", &alt[k])).collect();
+    order.sort_by(|&a, &b| gain(&rows[b]).total_cmp(&gain(&rows[a])));
+    let row = |name: &str, color: &str, v: &[WitPair]| (name.to_string(), color.to_string(), box_stats(v), v.len());
+    let mut chart: Vec<(String, String, [f32; 6], usize)> = order.iter().map(|&k| row(WIT_MECHANICS[k], "var(--accent)", &rows[k])).collect();
     chart.push(row("Total", "var(--accent-2)", all));
-    // Per mechanic: what it changes besides lengths, as set up vs on the old Wit.
+    // Per mechanic: what it changes besides lengths, old to new Wit.
     let effect = |k: usize| -> Element {
-        let v = &alt[k];
+        let v = &rows[k];
         match WIT_MECHANICS[k] {
             "Downhill" if used.contains(&0) => mode(0, v),
             "Position keep" if !pk.is_empty() => rsx! {
@@ -122,7 +129,7 @@ fn WitResults(r: WitRes) -> Element {
             },
             // Wit only picks among the shorter spurts (full spurt is decided by HP first): where they started.
             "Spurt candidates" => {
-                let p: Vec<(f32, f32)> = cur.iter().zip(v).filter(|(a, b)| b.lengths != 0.0 && a.spurt_start >= 0.0 && b.spurt_start >= 0.0).map(|(a, b)| (a.spurt_start, b.spurt_start)).collect();
+                let p: Vec<(f32, f32)> = v.iter().filter(|p| p.gain != 0.0 && p.new.spurt_start >= 0.0 && p.old.spurt_start >= 0.0).map(|p| (p.new.spurt_start, p.old.spurt_start)).collect();
                 if p.is_empty() {
                     rsx! { span { class: "muted", "-" } }
                 } else {
@@ -130,25 +137,27 @@ fn WitResults(r: WitRes) -> Element {
                     rsx! { "Spurt start {a:.0} m " {delta(a - b, true, format!("{:.0} m", (a - b).abs()))} }
                 }
             }
-            "Rushed" => rsx! { "Rushed {pct(rushed(cur))} " {pp(rushed(cur), rushed(v), true)} },
+            "Rushed" => rsx! { "Rushed {pct(rushed(v).1)} " {pp(rushed(v), true)} },
             "Skills" => {
-                let d = skills(cur) - skills(v);
-                rsx! { "{skills(cur):.2} skills per race " {delta(d, false, format!("{:.2}", d.abs()))} }
+                let (o, n) = skills(v);
+                rsx! { "{n:.2} skills per race " {delta(n - o, false, format!("{:.2}", (n - o).abs()))} }
             }
             _ => rsx! { span { class: "muted", "-" } },
         }
     };
+    let (fo, fnew) = full(all);
+    let (ro, rn) = rushed(all);
     rsx! {
         if stale() {
             div { class: "stale", "The setup changed since this run. Simulate again to update it." }
         }
         div { class: "kpis",
             div { b { "{total:+.2} L" } div { class: "kpi2", span { "lengths" } span { title: "95% range of the mean", "{total - ci:+.2} to {total + ci:+.2}" } } }
-            div { b { "{pct(full(all))} → {pct(full(cur))}" } div { class: "kpi2", span { "full spurt" } {pp(full(cur), full(all), false)} } }
-            div { b { "{pct(rushed(all))} → {pct(rushed(cur))}" } div { class: "kpi2", span { "rushed" } {pp(rushed(cur), rushed(all), true)} } }
+            div { b { "{pct(fo)} → {pct(fnew)}" } div { class: "kpi2", span { "full spurt" } {pp(full(all), false)} } }
+            div { b { "{pct(ro)} → {pct(rn)}" } div { class: "kpi2", span { "rushed" } {pp(rushed(all), true)} } }
             for &m in used.iter() {
                 div { key: "{m}",
-                    b { "{secs(all, m):.2} → {secs(cur, m):.2} s" }
+                    b { "{secs(all, m).0:.2} → {secs(all, m).1:.2} s" }
                     div { class: "kpi2", span { "{WIT_MODES[m].1.to_lowercase()}" } {change(m, all)} }
                 }
             }
@@ -169,14 +178,14 @@ fn WitResults(r: WitRes) -> Element {
                 tbody {
                     for k in order {
                         {
-                            let v = &alt[k];
+                            let v = &rows[k];
                             let changed = changed(v);
                             let open = *wsel.read() == Some(k);
                             rsx! {
                                 tr { key: "{k}", class: if open { "sel" },
                                     onclick: move |_| wsel.set(if open { None } else { Some(k) }),
                                     td { b { "{WIT_MECHANICS[k]}" } }
-                                    td { class: "num", "{mean(v, |x| x.lengths):+.2} L" }
+                                    td { class: "num", "{gain(v):+.2} L" }
                                     td { class: "num", "{pct(changed.len() as f32 / v.len().max(1) as f32)}" }
                                     td { {effect(k)} }
                                 }

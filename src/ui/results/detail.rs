@@ -61,6 +61,16 @@ pub(super) fn horse_detail(
         Some(_) if !has(h, id) => "removed",
         _ => "",
     };
+    // ▲/▼ vs the baseline (nothing without one): `f` of this run minus the baseline's, worded by `txt`.
+    let vs = |f: &dyn Fn(&HorseStats) -> f32, lower_better: bool, txt: fn(f32) -> String| {
+        b.map(|b| {
+            let d = f(h) - f(b);
+            delta(d, lower_better, txt(d.abs()))
+        })
+    };
+    let pp = |v: f32| format!("{:.1} pp", v * 100.0);
+    // Race events the uma was ever in, here or on the baseline.
+    let events: Vec<&RaceEvent> = EVENTS.iter().filter(|e| h.states[e.kind as usize].0 > 0.0 || b.is_some_and(|b| b.states[e.kind as usize].0 > 0.0)).collect();
     let strip: Vec<(String, String, Vec<f32>)> =
         h.skills.iter().map(|k| (skill_info(k.skill_id).name, color.clone(), k.distances.clone())).collect();
 
@@ -96,11 +106,29 @@ pub(super) fn horse_detail(
             if tab == 0 {
                 div { class: "kpirow",
                     div { class: "kpis",
-                        div { b { "{pct(h.win_rate)}" } span { "win" } }
-                        div { b { "{h.place.mean:.2}" } span { "avg place" } }
-                        div { b { "{ft(h.finish_time.p50)}" } span { "median time" } }
-                        div { b { "{pct(h.full_spurt_rate)}" } span { "full spurt" } }
-                        div { b { "{pct(h.hp_out_rate)}" } span { "ran out of HP" } }
+                        div { b { "{pct(h.win_rate)}" } div { class: "kpi2", span { "win" } {vs(&|x| x.win_rate, false, pp)} } }
+                        div { b { "{h.place.mean:.2}" } div { class: "kpi2", span { "avg place" } {vs(&|x| x.place.mean, true, |v| format!("{v:.2}"))} } }
+                        div { b { "{ft(h.finish_time.p50)}" } div { class: "kpi2", span { "median time" } {vs(&|x| x.finish_time.p50, true, |v| format!("{v:.3}s"))} } }
+                        div { b { "{pct(h.full_spurt_rate)}" } div { class: "kpi2", span { "full spurt" } {vs(&|x| x.full_spurt_rate, false, pp)} } }
+                        div { b { "{pct(h.hp_out_rate)}" } div { class: "kpi2", span { "ran out of HP" } {vs(&|x| x.hp_out_rate, true, pp)} } }
+                        for e in events {
+                            {
+                                let k = e.kind as usize;
+                                let (rate, secs) = h.states[k];
+                                rsx! {
+                                    div { key: "{k}", title: "{e.hint}",
+                                        div { class: "kpi2",
+                                            b { "{pct(rate)}" }
+                                            {vs(&move |x| x.states[k].0, !e.more_good, pp)}
+                                        }
+                                        div { class: "kpi2",
+                                            span { "{e.label.to_lowercase()}" }
+                                            span { "{secs:.1}s " {vs(&move |x| x.states[k].1, !e.more_good, |v| format!("{v:.1}s"))} }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     if n > 1 {
                         div { class: "placebox",
