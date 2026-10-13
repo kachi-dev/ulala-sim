@@ -119,7 +119,6 @@ pub fn TopCourse() -> Element {
             let name = |card| card_info(card).map(|c| skill_info(c.unique_skill).name).unwrap_or_default();
             x.map_or(vec![], |x| one_region(&name(x.card_id), &x.distances, cv.distance))
         }
-        Tab::Stamina => vec![],
     };
     rsx! {
         div { class: "topchart", id: "topchart",

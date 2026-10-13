@@ -188,6 +188,7 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                 if tab == DetailTab::Skills {
                     {activations(res, names, cur, Some(f))}
                 } else {
+                    {event_kpis(&cur.horses[f], base.map(|b| &b.horses[f]))}
                     h4 { "Over the course" }
                     RaceChart {
                         cur: traces(cur),
@@ -294,6 +295,32 @@ fn why(c: &SkillCheck, h: &HorseRun, goal: f32, n: usize) -> Element {
         div { class: "why {outcome_class(c.outcome.kind())}",
             b { "{head}" }
             div { class: "muted small", "{detail}" }
+        }
+    }
+}
+
+/// Seconds in each race event (duel, spot struggle, rushed, blocked, ...) the uma was in, here or on the baseline,
+/// with the change from the baseline.
+fn event_kpis(h: &HorseRun, b: Option<&HorseRun>) -> Element {
+    let secs = |x: &HorseRun, k: u8| x.state_time[k as usize];
+    let shown: Vec<&RaceEvent> = EVENTS.iter().filter(|e| secs(h, e.kind) > 0.0 || b.is_some_and(|b| secs(b, e.kind) > 0.0)).collect();
+    if shown.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: "kpis",
+            for e in shown {
+                {
+                    let t = secs(h, e.kind);
+                    let d = b.map(|b| t - secs(b, e.kind)).filter(|d| d.abs() >= 0.05);
+                    rsx! {
+                        div { key: "{e.kind}", title: "{e.hint}",
+                            b { "{t:.1}s " if let Some(d) = d { {delta(d, !e.more_good, format!("{:.1}s", d.abs()))} } }
+                            span { "{e.label.to_lowercase()}" }
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -28,7 +28,7 @@ pub struct DebuffStat {
     pub hit_at: Vec<f32>,
 }
 
-/// The Stamina tab's measurement of one horse.
+/// The Stamina subtab's measurement of one horse.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Stamina {
     pub stats: HorseStats,
@@ -36,7 +36,7 @@ pub struct Stamina {
     pub loss: Vec<(f32, SpurtKind)>,
     /// Full-spurt rate at `MAX_STAMINA`.
     pub full_at_max: f32,
-    /// Stamina debuffs of the rest of the field, most HP taken first.
+    /// Stamina debuffs of the other teams, most HP taken first.
     pub debuffs: Vec<DebuffStat>,
     /// Full-spurt and ran-out-of-HP rates with every debuff muted (None without debuffs).
     pub all_muted: Option<(f32, f32)>,
@@ -48,17 +48,24 @@ pub fn drains_hp(race: &Race, id: i32) -> bool {
     a.into_iter().any(|a| a.ability_type == ability_type::HP && a.float_ability_value < 0 && a.target_type != target_type::SELF)
 }
 
-/// Horse `i` of `input` on `seeds`: its batch stats; the same seeds with its stamina at `MAX_STAMINA` (lengths lost
-/// to stamina); and each HP-draining skill another horse owns muted, then all of them (what they cost it). Muting
-/// keeps the RNG draws and events, so a pair differs only by the effect. `with_debuffs` false skips the debuffs.
-pub fn stamina(race: &Race, input: &RaceInput, i: usize, seeds: &[i32], with_debuffs: bool, w: &Work) -> Stamina {
-    let debuffs: Vec<(usize, i32)> = input
+/// HP-draining skills that can hit horse `i`: (owner, skill) of every other horse not on its team.
+pub fn field_debuffs(race: &Race, input: &RaceInput, i: usize) -> Vec<(usize, i32)> {
+    let team = input.horses[i].team_id;
+    let foe = |o: usize, t: i32| o != i && (team == 0 || t != team);
+    input
         .horses
         .iter()
         .enumerate()
-        .filter(|&(o, _)| with_debuffs && o != i)
+        .filter(|&(o, h)| foe(o, h.team_id))
         .flat_map(|(o, h)| h.skills.iter().filter(|k| drains_hp(race, k.skill_id)).map(move |k| (o, k.skill_id)))
-        .collect();
+        .collect()
+}
+
+/// Horse `i` of `input` on `seeds`: its batch stats; the same seeds with its stamina at `MAX_STAMINA` (lengths lost
+/// to stamina); and each HP-draining skill of another team muted, then all of them (what they cost it). Muting
+/// keeps the RNG draws and events, so a pair differs only by the effect. `with_debuffs` false skips the debuffs.
+pub fn stamina(race: &Race, input: &RaceInput, i: usize, seeds: &[i32], with_debuffs: bool, w: &Work) -> Stamina {
+    let debuffs = if with_debuffs { field_debuffs(race, input, i) } else { vec![] };
     let run = |seed: i32, edit: &dyn Fn(&mut RaceInput)| {
         let mut inp = RaceInput { random_seed: seed, ..input.clone() };
         inp.horses[i].viewer_id = 1; // dense frames near the goal (recording only), for `gap_lengths`

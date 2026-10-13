@@ -205,6 +205,12 @@ fn stamina_debuffs() {
     owner.skills.push(SkillInput { skill_id: 200891, level: 1 });
     input.horses = vec![new_horse(&race, 105201), owner];
     assert!(drains_hp(&race, 200891) && !drains_hp(&race, 200331));
+    // A teammate's debuff can't hit her: not measured.
+    let mut team = input.clone();
+    (team.horses[0].team_id, team.horses[1].team_id) = (1, 1);
+    assert!(field_debuffs(&race, &team, 0).is_empty());
+    team.horses[1].team_id = 2;
+    assert_eq!(field_debuffs(&race, &team, 0), vec![(1, 200891)]);
     let st = stamina(&race, &input, 0, &seeds(1, 8), true, &Work::default());
     assert_eq!((st.loss.len(), st.stats.times.len(), st.debuffs.len()), (8, 8, 1));
     let d = &st.debuffs[0];

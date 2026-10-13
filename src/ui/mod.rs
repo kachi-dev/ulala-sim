@@ -53,7 +53,6 @@ enum Tab {
     Results,
     Gains,
     Ranking,
-    Stamina,
 }
 
 /// Subtabs of an uma's detail in the results (a single run has only Summary and Skills).
@@ -125,15 +124,14 @@ struct RankRes {
 
 #[derive(Clone)]
 struct StamRes {
-    card: i32,
-    chara: i32,
+    /// Field index in the batch it was measured on.
+    horse: usize,
     st: Arc<Stamina>,
     /// The field it ran in (NPCs included).
     field: Arc<Vec<HorseInput>>,
     /// The same uma and seeds on the pinned baseline, when it differs where it matters.
     base: Option<Arc<Stamina>>,
     cv: Arc<CourseView>,
-    npc: bool,
     rev: u64,
 }
 
@@ -223,15 +221,15 @@ struct S {
     r_sort: Signal<(ranking::RankCol, bool)>,
     r_sel: Signal<Option<(i32, i32)>>,
     r_matrix: Signal<bool>,
-    // Stamina tab
-    st_npc: Signal<Option<bool>>,
+    // Stamina subtab of the batch uma detail
+    /// Seeds for the stamina calculation (its own count, not the batch's).
     st_n: Signal<usize>,
     st_res: Signal<Option<StamRes>>,
-    /// Debuffs subtab (else Spurt).
-    st_debuffs: Signal<bool>,
     /// (owner, skill) open in the debuffs table.
     st_dsel: Signal<Option<(usize, i32)>>,
     // Wit subtab of the batch uma detail
+    /// Seeds for the Wit calculation.
+    w_n: Signal<usize>,
     w_res: Signal<Option<WitRes>>,
     /// Mechanic row open in the table.
     w_sel: Signal<Option<usize>>,
@@ -306,11 +304,10 @@ pub fn App() -> Element {
         r_sort: use_signal(|| (ranking::RankCol::Mean, true)),
         r_sel: use_signal(|| None),
         r_matrix: use_signal(|| true),
-        st_npc: use_signal(|| None),
         st_n: use_signal(|| 500),
         st_res: use_signal(|| None),
-        st_debuffs: use_signal(|| false),
         st_dsel: use_signal(|| None),
+        w_n: use_signal(|| 500),
         w_res: use_signal(|| None),
         w_sel: use_signal(|| None),
         g_n: use_signal(|| 200),
@@ -420,13 +417,11 @@ fn Workspace() -> Element {
                     {tab_btn(Tab::Results, "Results", stale())}
                     {tab_btn(Tab::Gains, "Skill gains", false)}
                     {tab_btn(Tab::Ranking, "Uma ranking", false)}
-                    {tab_btn(Tab::Stamina, "Stamina", false)}
                 }
                 // Always mounted: each pane keeps its scroll position and state across tab switches.
                 div { class: "pane", id: "pane-results", hidden: tab != Tab::Results, results::ResultsTab {} }
                 div { class: "pane", id: "pane-gains", hidden: tab != Tab::Gains, gains::GainsTab {} }
                 div { class: "pane", id: "pane-ranking", hidden: tab != Tab::Ranking, ranking::RankingTab {} }
-                div { class: "pane", id: "pane-stamina", hidden: tab != Tab::Stamina, stamina::StaminaTab {} }
             }
         }
     }

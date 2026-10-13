@@ -101,6 +101,9 @@ pub(super) fn horse_detail(
                 if let (DetailTab::Wit, Some(old)) = (tab, old_wiz) {
                     crate::ui::wit::WitRun { i, old }
                 }
+                if tab == DetailTab::Stamina {
+                    crate::ui::stamina::StaminaRun { i }
+                }
             }
             if tab == DetailTab::Summary {
                 div { class: "kpirow",
@@ -151,7 +154,8 @@ pub(super) fn horse_detail(
                 }
             }
             if tab == DetailTab::Stamina {
-                {spurt_and_hp(h, cv, &color)}
+                {crate::ui::stamina::stamina_cards(h, b, cv)}
+                crate::ui::stamina::StaminaOut { i }
             }
             if tab == DetailTab::Wit {
                 {crate::ui::wit::wit_cards(h, b, diff)}

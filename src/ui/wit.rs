@@ -1,5 +1,5 @@
 //! Wit subtab of the batch uma detail (only for an uma whose Wit differs from the baseline): what the Wit change does
-//! through each mechanic that reads Wit, one at a time, on the run's field and seeds.
+//! through each mechanic that reads Wit, one at a time, on the run's field, over their own seed count.
 
 use super::*;
 use crate::charts::{GainChart, Histogram};
@@ -98,21 +98,22 @@ pub(super) fn WitRun(i: usize, old: i32) -> Element {
     let s = use_context::<S>();
     let running = use_busy(s);
     let res = s.res.cloned();
-    let Some((input, seeds)) = res.and_then(|r| match r.kind {
-        Kind::Batch { cur, .. } => Some((r.input, cur.seeds.clone())),
+    let Some(input) = res.and_then(|r| match r.kind {
+        Kind::Batch { .. } => Some(r.input),
         Kind::Single { .. } => None,
     }) else {
         return rsx! {};
     };
     let new = input.horses[i].wiz;
+    let n = *s.w_n.read();
     // Per seed: the baseline, then each mechanic on the new Wit, then all of them.
-    let runs = seeds.len() * (WIT_MECHANICS.len() + 2);
+    let runs = n * (WIT_MECHANICS.len() + 2);
     let work = runs * input.horses.len();
     let eta = eta(s, work);
-    let n = seeds.len();
     let start = move |_| {
         let Some(race) = s.race.cloned() else { return };
-        let (input, seeds) = (input.clone(), seeds.clone());
+        let input = input.clone();
+        let seeds = seeds(input.random_seed, n);
         let rev = *s.rev.peek();
         let label = format!("Simulating {} races", thousands(runs));
         let run = move |w: &Work| Arc::new(wit(&race, &input, i, old, &seeds, w));
@@ -122,7 +123,10 @@ pub(super) fn WitRun(i: usize, old: i32) -> Element {
         });
     };
     rsx! {
-        button { class: "btn small", disabled: running(), onclick: start, "Calculate length differences" }
+        div { class: "runn",
+            button { class: "btn small", disabled: running(), onclick: start, "Calculate length differences" }
+            {seeds_input("wn", s.w_n, 10, 20000)}
+        }
         span { class: "chip", "Wit {old} → {new}" }
         span { class: "muted small", "{thousands(runs)} races, {eta}" }
         Progress {}
