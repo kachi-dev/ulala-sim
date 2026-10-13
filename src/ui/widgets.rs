@@ -123,11 +123,20 @@ pub(super) fn subline(horses: &[HorseInput], trainers: &[String], i: usize) -> O
     trainers.get(i).filter(|t| !t.is_empty()).cloned().or_else(|| dup.then(|| card_title(horses[i].card_id)))
 }
 
-fn rarity_class(r: i32) -> &'static str {
-    match r {
-        ..=1 => "r1",
-        2 => "r2",
-        _ => "r3",
+/// A skill's rarity tint: CSS class (skill rows) and colour (charts). Inherited uniques look like whites.
+pub(super) fn rarity_class(k: &SkillInfo) -> &'static str {
+    match k.kind() {
+        Rarity::White | Rarity::Inherited => "r1",
+        Rarity::Gold => "r2",
+        Rarity::Unique => "r3",
+    }
+}
+
+pub(super) fn rarity_color(k: &SkillInfo) -> &'static str {
+    match k.kind() {
+        Rarity::White | Rarity::Inherited => "#63bfe9",
+        Rarity::Gold => "#e8ae1c",
+        Rarity::Unique => "#f0699b",
     }
 }
 
@@ -139,11 +148,11 @@ pub(super) fn skill_row(k: &SkillInfo, level: Option<i32>, extra: &str) -> Eleme
     let inh = k.inherited;
     let tip = format!("{}{}: {}", k.name, if inh { " (inherited)" } else { "" }, k.description);
     rsx! {
-        div { class: "skr {rarity_class(k.rarity)} {extra}", title: "{tip}",
+        div { class: "skr {rarity_class(k)} {extra}", title: "{tip}",
             if icon { img { src: "/a/{rel}", alt: "" } } else { span { class: "ski" } }
             span { class: "skn", "{k.name}" }
             if inh { span { class: "inh", "inherited" } }
-            if let Some(l) = level.filter(|_| k.rarity >= 3) { span { class: "lv", "Lv{l}" } }
+            if let Some(l) = level.filter(|_| k.is_unique()) { span { class: "lv", "Lv{l}" } }
         }
     }
 }
@@ -274,7 +283,7 @@ pub(super) fn icon(kind: &str) -> Element {
 
 /// Sortable column header for `sort` = (column, descending): clicking the sorted column flips it, another column
 /// starts descending (ascending when `asc_first`).
-pub(super) fn sort_th(mut sort: Signal<(usize, bool)>, c: usize, label: &str, num: bool, asc_first: bool) -> Element {
+pub(super) fn sort_th<C: Copy + PartialEq + 'static>(mut sort: Signal<(C, bool)>, c: C, label: &str, num: bool, asc_first: bool) -> Element {
     let (col, desc) = *sort.read();
     let arrow = if c == col { if desc { " ▼" } else { " ▲" } } else { "" };
     rsx! {
@@ -322,7 +331,7 @@ pub(super) fn mode_seg(s: S, mut sel: Signal<Option<bool>>, field: usize) -> (El
     let size = if npc { FIELD_MIN } else { field.max(FIELD_MIN) };
     let li = *lobby.read();
     let (name, mix) = LOBBIES[li.min(LOBBIES.len() - 1)];
-    let mix = ["Runaway", "Front", "Pace", "Late", "End"].iter().zip(mix).filter(|x| x.1 > 0).map(|(l, k)| format!("{k} {l}")).collect::<Vec<_>>().join(", ");
+    let mix = LOBBY_STYLES.iter().zip(mix).filter(|x| x.1 > 0).map(|(l, k)| format!("{k} {l}")).collect::<Vec<_>>().join(", ");
     let el = rsx! {
         div { class: "field",
             span { "Run" }
@@ -410,9 +419,9 @@ pub(super) fn key_apts(h: &HorseInput, cv: Option<&CourseView>) -> [(&'static st
         .unwrap_or((0, 2));
     let st = (h.running_style - 1).clamp(0, 3) as usize;
     [
-        (["Turf", "Dirt"][surf], h.proper_ground[surf]),
+        (SURFACES[surf], h.proper_ground[surf]),
         (["Short", "Mile", "Medium", "Long"][dist], h.proper_distance[dist]),
-        (STYLES[st + 1], h.proper_running_style[st]),
+        (STYLES[st], h.proper_running_style[st]),
     ]
 }
 
@@ -442,9 +451,6 @@ pub(super) fn thousands(n: usize) -> String {
     }
     out
 }
-pub(super) fn style_label(st: i32) -> &'static str {
-    STYLES.get(st as usize).copied().unwrap_or("?")
-}
 pub(super) fn style_name(race: &Race, h: &HorseInput) -> String {
     let s = style_label(h.running_style);
     if runaway(race, h) { format!("{s} (Runaway)") } else { s.to_string() }
@@ -462,12 +468,27 @@ pub(super) fn date(d: &str) -> String {
 /// `▲`/`▼` with good/bad colouring. `d` is the change; `lower_better` flips the colour. A change that rounds to
 /// zero in `txt` shows as "±0".
 pub(super) fn delta(d: f32, lower_better: bool, txt: String) -> Element {
-    if txt.chars().filter(|c| c.is_ascii_digit()).all(|c| c == '0') {
+    if shows_zero(&txt) {
         return rsx! { span { class: "d flat", "±0" } };
     }
     let good = (d < 0.0) == lower_better;
     let arrow = if d > 0.0 { "▲" } else { "▼" };
     rsx! { span { class: if good { "d good" } else { "d bad" }, "{arrow} {txt}" } }
+}
+
+/// A formatted number that rounded to zero (every digit 0).
+pub(super) fn shows_zero(txt: &str) -> bool {
+    txt.chars().filter(|c| c.is_ascii_digit()).all(|c| c == '0')
+}
+
+/// A rate change in percentage points, unsigned: "3.8 pp".
+pub(super) fn pp(d: f32) -> String {
+    format!("{:.1} pp", d.abs() * 100.0)
+}
+
+/// `delta` of a rate from `old` to `new`: "▲ 3.8 pp".
+pub(super) fn pp_delta(old: f32, new: f32, lower_better: bool) -> Element {
+    delta(new - old, lower_better, pp(new - old))
 }
 
 /// Finish-time change, worded: "▼ 0.176s faster".

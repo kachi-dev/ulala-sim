@@ -111,7 +111,7 @@ pub(super) fn FieldCard() -> Element {
             span { "{mood_name(h.motivation)}" }
         };
         if compact {
-            let unique = h.skills.iter().find(|k| skill_info(k.skill_id).rarity >= 3).copied();
+            let unique = h.skills.iter().find(|k| skill_info(k.skill_id).is_unique()).copied();
             rsx! {
                 div {
                     key: "{i}",
@@ -243,7 +243,7 @@ pub(super) fn skill_list(mut s: S, i: usize, h: &HorseInput, b: &HorseInput, ful
             for (j, k) in game_order(&h.skills).into_iter().take(shown) {
                 {
                     let base_k = b.skills.iter().find(|x| x.skill_id == k.skill_id).copied();
-                    let lvl_input = full && skill_info(k.skill_id).rarity >= 3 && !skill_info(k.skill_id).inherited;
+                    let lvl_input = full && skill_info(k.skill_id).is_unique();
                     rsx! {
                         div { key: "{k.skill_id}", class: "skedit",
                             SkillX {

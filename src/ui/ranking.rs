@@ -9,6 +9,15 @@ fn heat(v: f32, max: f32) -> String {
     format!("background: color-mix(in srgb, var(--accent) {:.0}%, transparent)", a * 70.0)
 }
 
+/// Sortable columns of the ranking table.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum RankCol {
+    Style,
+    Mean,
+    Median,
+    Activates,
+}
+
 /// Costume cell: icon, name and costume title, plus the unique skill's name when `unique`.
 fn card_who(card: i32, unique: bool) -> Element {
     let ci = card_info(card);
@@ -134,10 +143,10 @@ fn RankResults() -> Element {
     let (col, desc) = *sort.read();
     let mut rows: Vec<&UmaRank> = r.items.iter().collect();
     let key = |x: &UmaRank| match col {
-        2 => x.lengths.p50,
-        3 => x.rate,
-        4 => x.style as f32,
-        _ => x.lengths.mean,
+        RankCol::Style => x.style as f32,
+        RankCol::Mean => x.lengths.mean,
+        RankCol::Median => x.lengths.p50,
+        RankCol::Activates => x.rate,
     };
     rows.sort_by(|a, b| key(a).total_cmp(&key(b)));
     if desc {
@@ -170,7 +179,7 @@ fn RankResults() -> Element {
                         thead {
                             tr {
                                 th { "Uma" }
-                                for l in &STYLES[1..] { th { class: "num", "{l}" } }
+                                for l in STYLES { th { class: "num", "{l}" } }
                             }
                         }
                         tbody {
@@ -216,11 +225,11 @@ fn RankResults() -> Element {
                         thead {
                             tr {
                                 th { "Uma" }
-                                {sort_th(sort, 4, "Style", true, true)}
-                                {sort_th(sort, 1, "Mean", true, false)}
-                                {sort_th(sort, 2, "Median", true, false)}
+                                {sort_th(sort, RankCol::Style, "Style", true, true)}
+                                {sort_th(sort, RankCol::Mean, "Mean", true, false)}
+                                {sort_th(sort, RankCol::Median, "Median", true, false)}
                                 th { class: "num", "p10 to p90" }
-                                {sort_th(sort, 3, "Activates", true, false)}
+                                {sort_th(sort, RankCol::Activates, "Activates", true, false)}
                             }
                         }
                         tbody {

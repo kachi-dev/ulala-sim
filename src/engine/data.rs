@@ -8,10 +8,11 @@ use uma_race_sim::data::{DATA_DIR, DataEra, GameData};
 
 use super::app_dir;
 
-pub(super) const STYLES: [&str; 4] = ["Front", "Pace", "Late", "End"];
-pub(super) const DISTANCES: [&str; 4] = ["Sprint", "Mile", "Medium", "Long"];
-pub(super) const PHASES: [&str; 4] = ["Early race", "Mid race", "Late race", "Last spurt"];
-pub(super) const SURFACES: [&str; 2] = ["Turf", "Dirt"];
+/// Running styles 1 ..= 4 (Nige, Senko, Sashi, Oikomi).
+pub const STYLES: [&str; 4] = ["Front", "Pace", "Late", "End"];
+pub const DISTANCES: [&str; 4] = ["Sprint", "Mile", "Medium", "Long"];
+pub const PHASES: [&str; 4] = ["Early race", "Mid race", "Late race", "Last spurt"];
+pub const SURFACES: [&str; 2] = ["Turf", "Dirt"];
 pub(super) const TURNS: [&str; 4] = ["Right", "Left", "Straight", "Straight"];
 /// Global names for RaceDefine.GroundCondition Good/Soft/Hard/Bad.
 pub(super) const GROUNDS: [&str; 4] = ["Firm", "Good", "Soft", "Heavy"];
@@ -21,6 +22,11 @@ pub(super) const SEASONS: [&str; 5] = ["Spring", "Summer", "Fall", "Winter", "Sp
 /// `v[i - 1]` (game enums are 1-based).
 pub(super) fn pick(v: &[&'static str], i: i32) -> Option<&'static str> {
     v.get(usize::try_from(i - 1).ok()?).copied()
+}
+
+/// Running style `st` (1 ..= 4) as shown, "?" otherwise.
+pub fn style_label(st: i32) -> &'static str {
+    pick(&STYLES, st).unwrap_or("?")
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -46,7 +52,7 @@ pub fn cards() -> &'static [CardInfo] {
 
 pub fn card_info(card_id: i32) -> Option<CardInfo> {
     let c = names().card.get(&card_id)?;
-    Some(CardInfo { card_id, chara_id: c.1, name: chara_name(c.1), title: c.0.clone(), unique_skill: c.2 })
+    Some(CardInfo { card_id, chara_id: c.chara_id, name: chara_name(c.chara_id), title: c.title.clone(), unique_skill: c.unique_skill })
 }
 
 /// Display name ("Haru Urara"), "#<id>" when unknown.
@@ -191,26 +197,46 @@ pub fn cm_preset_of(input: &RaceInput) -> Option<usize> {
     cm_presets().iter().position(|p| (p.course_set_id, p.ground, p.weather, p.season, p.time) == key)
 }
 
-/// [title, chara_id, unique skill, running style, 10 aptitudes: short mile middle long, nige senko sashi oikomi, turf dirt]
+/// A card in names.json: [title, chara_id, unique skill, running style, then the aptitudes (`HorseInput` grades): short
+/// mile middle long, nige senko sashi oikomi, turf dirt].
 #[derive(Deserialize)]
 #[serde(from = "(String, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)")]
-pub(super) struct CardRow(pub(super) String, pub(super) i32, pub(super) i32, pub(super) i32, pub(super) [i32; 10]);
+pub(super) struct CardRow {
+    pub(super) title: String,
+    pub(super) chara_id: i32,
+    pub(super) unique_skill: i32,
+    pub(super) running_style: i32,
+    pub(super) proper_distance: [i32; 4],
+    pub(super) proper_running_style: [i32; 4],
+    pub(super) proper_ground: [i32; 2],
+}
 
 impl From<(String, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)> for CardRow {
     fn from(r: (String, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)) -> Self {
-        CardRow(r.0, r.1, r.2, r.3, [r.4, r.5, r.6, r.7, r.8, r.9, r.10, r.11, r.12, r.13])
+        CardRow {
+            title: r.0,
+            chara_id: r.1,
+            unique_skill: r.2,
+            running_style: r.3,
+            proper_distance: [r.4, r.5, r.6, r.7],
+            proper_running_style: [r.8, r.9, r.10, r.11],
+            proper_ground: [r.12, r.13],
+        }
     }
 }
 
-/// [name, description, rarity, icon_id, disp_order (both optional)]
+/// A skill in names.json: [name, description, rarity, icon_id, disp_order] (the last two optional).
 #[derive(Deserialize)]
-pub(super) struct SkillName(
-    pub(super) String,
-    pub(super) String,
-    pub(super) i32,
-    #[serde(default)] pub(super) i32,
-    #[serde(default)] pub(super) i32,
-);
+pub(super) struct SkillName {
+    pub(super) name: String,
+    pub(super) description: String,
+    pub(super) rarity: i32,
+    #[serde(default)]
+    pub(super) icon_id: i32,
+    /// The game's order of an uma's skills (`skill_data.disp_order`).
+    #[serde(default)]
+    pub(super) disp_order: i32,
+}
 
 pub(super) fn names() -> &'static Names {
     static N: OnceLock<Names> = OnceLock::new();

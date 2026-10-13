@@ -3,6 +3,17 @@
 
 use super::*;
 use crate::charts::{GainChart, Histogram};
+use uma_race_sim::api::{span_kind, wiz_mechanic};
+
+/// `WIT_MODES[m]` is downhill accel (the rest are position keep modes).
+fn is_downhill(m: usize) -> bool {
+    WIT_MODES[m].0 == span_kind::DOWNHILL
+}
+
+/// A change of `d` seconds in `WIT_MODES[m]`: more downhill accel is good; the position keep modes are neither.
+fn mode_delta(m: usize, d: f32) -> Element {
+    if is_downhill(m) { delta(d, false, format!("{:.2} s", d.abs())) } else { rsx! { span { class: "d flat", "{d:+.2} s" } } }
+}
 
 /// Horse `i`'s Wit on the baseline, when it differs from `input`'s.
 pub(super) fn old_wit(s: S, input: &RaceInput, i: usize) -> Option<i32> {
@@ -37,7 +48,7 @@ fn box_stats(v: &[WitPair]) -> [f32; 6] {
 /// Horse `h` of the batch vs `b`, the same uma on the baseline (when there is one): lengths, full spurt, rushed and time in
 /// the Wit-driven modes, straight from the two batches.
 pub(super) fn wit_cards(h: &HorseStats, b: Option<&HorseStats>, diff: Option<&BatchDiff>) -> Element {
-    let rushed = |x: &HorseStats| x.states[uma_race_sim::api::span_kind::RUSHED as usize].0;
+    let rushed = |x: &HorseStats| x.states[span_kind::RUSHED as usize].0;
     // Mean seconds per race in `WIT_MODES[m]` (`states` holds the share of races and the mean over those).
     let secs = |x: &HorseStats, m: usize| {
         let (share, s) = x.states[WIT_MODES[m].0 as usize];
@@ -54,13 +65,7 @@ pub(super) fn wit_cards(h: &HorseStats, b: Option<&HorseStats>, diff: Option<&Ba
             delta(d, lower_better, txt(d.abs()))
         })
     };
-    let pp = |v: f32| format!("{:.1} pp", v * 100.0);
-    let s2 = |v: f32| format!("{v:.2} s");
-    // More downhill accel is good; the position keep modes are neither.
-    let mode_ch = |m: usize| -> Option<Element> {
-        let d = secs(h, m) - secs(b?, m);
-        Some(if m == 0 { delta(d, false, s2(d.abs())) } else { rsx! { span { class: "d flat", "{d:+.2} s" } } })
-    };
+    let mode_ch = |m: usize| Some(mode_delta(m, secs(h, m) - secs(b?, m)));
     // Modes the uma is ever in (a Front runner never paces up or down, the others never speed up or overtake).
     let used: Vec<usize> = (0..WIT_MODES.len()).filter(|&m| secs(h, m) > 0.0 || b.is_some_and(|b| secs(b, m) > 0.0)).collect();
     // Mean lengths vs the baseline and its 95% range.
@@ -142,22 +147,20 @@ fn WitResults(r: WitRes) -> Element {
     let rev = r.rev;
     let stale = use_stale(s, move || Some(rev));
     let rows = &r.wit.rows;
-    let all = &rows[WIT_MECHANICS.len()];
+    let all = &r.wit.all;
     let rushed = |v: &[WitPair]| means(v, |x| x.rushed as u8 as f32);
     let skills = |v: &[WitPair]| means(v, |x| x.skills as f32);
     let secs = |v: &[WitPair], m: usize| means(v, |x| x.modes[m]);
-    // Change in seconds in mode `m`, old to new Wit. More downhill accel is good; the position keep modes are neither.
-    let change = |m: usize, v: &[WitPair]| -> Element {
+    // "Pace up 20.17 s +0.70 s": mode `m` on the new Wit, and its change from the old.
+    let mode = |m: usize, v: &[WitPair]| {
         let (o, n) = secs(v, m);
-        let d = n - o;
-        if m == 0 { delta(d, false, format!("{:.2} s", d.abs())) } else { rsx! { span { class: "d flat", "{d:+.2} s" } } }
+        rsx! { "{WIT_MODES[m].1} {n:.2} s " {mode_delta(m, n - o)} }
     };
-    let mode = |m: usize, v: &[WitPair]| rsx! { "{WIT_MODES[m].1} {secs(v, m).1:.2} s " {change(m, v)} };
     // Modes the uma is ever in (a Front runner never paces up or down, the others never speed up or overtake).
     let used: Vec<usize> = (0..WIT_MODES.len()).filter(|&m| all.iter().any(|p| p.new.modes[m] > 0.0 || p.old.modes[m] > 0.0)).collect();
-    let pk: Vec<usize> = used.iter().copied().filter(|&m| m > 0).collect();
-    // `(old, new)` as "▲ 3.8 pp".
-    let pp = |(o, n): (f32, f32), lower_better: bool| delta(n - o, lower_better, format!("{:.1} pp", (n - o).abs() * 100.0));
+    let downhill = used.iter().copied().find(|&m| is_downhill(m));
+    let pk: Vec<usize> = used.iter().copied().filter(|&m| !is_downhill(m)).collect();
+    let pp = |(o, n): (f32, f32), lower_better: bool| pp_delta(o, n, lower_better);
     // Mechanics by mean gain, most first.
     let mut order: Vec<usize> = (0..WIT_MECHANICS.len()).collect();
     order.sort_by(|&a, &b| gain(&rows[b]).total_cmp(&gain(&rows[a])));
@@ -167,30 +170,31 @@ fn WitResults(r: WitRes) -> Element {
     // Per mechanic: what it changes besides lengths, old to new Wit.
     let effect = |k: usize| -> Element {
         let v = &rows[k];
-        match WIT_MECHANICS[k] {
-            "Downhill" if used.contains(&0) => mode(0, v),
-            "Position keep" if !pk.is_empty() => rsx! {
+        let none = rsx! { span { class: "muted", "-" } };
+        match 1u8 << k {
+            wiz_mechanic::DOWNHILL => downhill.map_or(none, |m| mode(m, v)),
+            wiz_mechanic::POSITION_KEEP if !pk.is_empty() => rsx! {
                 for (j, &m) in pk.iter().enumerate() {
                     if j > 0 { " · " }
                     {mode(m, v)}
                 }
             },
             // Wit only picks among the shorter spurts (full spurt is decided by HP first): where they started.
-            "Spurt candidates" => {
+            wiz_mechanic::LAST_SPURT => {
                 let p: Vec<(f32, f32)> = v.iter().filter(|p| p.gain != 0.0 && p.new.spurt_start >= 0.0 && p.old.spurt_start >= 0.0).map(|p| (p.new.spurt_start, p.old.spurt_start)).collect();
                 if p.is_empty() {
-                    rsx! { span { class: "muted", "-" } }
+                    none
                 } else {
                     let (a, b) = (p.iter().map(|x| x.0).sum::<f32>() / p.len() as f32, p.iter().map(|x| x.1).sum::<f32>() / p.len() as f32);
                     rsx! { "Spurt start {a:.0} m " {delta(a - b, true, format!("{:.0} m", (a - b).abs()))} }
                 }
             }
-            "Rushed" => rsx! { "Rushed {pct(rushed(v).1)} " {pp(rushed(v), true)} },
-            "Skills" => {
+            wiz_mechanic::RUSHED => rsx! { "Rushed {pct(rushed(v).1)} " {pp(rushed(v), true)} },
+            wiz_mechanic::SKILLS => {
                 let (o, n) = skills(v);
                 rsx! { "{n:.2} skills per race " {delta(n - o, false, format!("{:.2}", (n - o).abs()))} }
             }
-            _ => rsx! { span { class: "muted", "-" } },
+            _ => none,
         }
     };
     rsx! {

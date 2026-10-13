@@ -8,7 +8,7 @@ mod single;
 use super::*;
 use batch::batch_view;
 use single::single_view;
-pub(super) use detail::{SPURT_KINDS, spurt_and_hp};
+pub(super) use detail::{spurt_and_hp, spurt_style};
 
 #[component]
 pub fn ResultsTab() -> Element {
@@ -73,6 +73,6 @@ fn who(res: &Res, names: &[String], i: usize) -> Element {
 /// Signed lengths, green ahead / red behind: "+1.23 L".
 fn len_delta(v: f32) -> Element {
     let txt = format!("{v:+.2} L");
-    let class = if txt.starts_with("+0.00") || txt.starts_with("-0.00") { "d flat" } else if v > 0.0 { "d good" } else { "d bad" };
+    let class = if shows_zero(&txt) { "d flat" } else if v > 0.0 { "d good" } else { "d bad" };
     rsx! { span { class: "{class}", title: "Horse lengths (2.5 m) vs the baseline, + = ahead", "{txt}" } }
 }

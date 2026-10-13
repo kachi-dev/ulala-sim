@@ -655,28 +655,26 @@ table.matrix td.never { color: var(--muted); background: repeating-linear-gradie
 .kb-v { text-align: right; }
 .ok-line { color: var(--good); font-weight: 700; padding: 6px 0; }
 /* Colours by class: a style string with two declarations lost its second one when Dioxus re-rendered the row. */
-.kb-f.k0 { background: var(--good); } .kb-f.k1 { background: var(--accent-2); } .kb-f.k2 { background: #e8ae1c; }
-.kb-f.k3 { background: var(--accent); } .kb-f.k4 { background: var(--bad); }
 .modal.notice { z-index: 12; top: 30vh; width: min(460px, 92vw); padding: 20px 22px; gap: 10px; }
 .modal.notice h3 { margin: 0; }
 .modal.notice p { margin: 0; }
 .modal.notice .btn { align-self: flex-end; }
 .modal.notice .btns { display: flex; gap: 8px; justify-content: flex-end; }
 
-/* Skill outcomes: activated / wit check / can't here / conditions not met (OUTCOMES). */
+/* Skill outcomes (`outcome_class`). */
 .oline { height: 1lh; display: flex; align-items: center; }
 .obar { flex: 1; display: flex; height: 9px; min-width: 90px; border-radius: 5px; overflow: hidden; background: var(--surface-2); cursor: help; }
 .obar > div { min-width: 2px; }
-.obar .o0, .olegend i.o0 { background: var(--good); }
-.obar .o1, .olegend i.o1 { background: #e8ae1c; }
-.obar .o2, .olegend i.o2 { background: var(--muted); }
-.obar .o3, .olegend i.o3 { background: var(--bad); }
+.obar .o-act, .olegend i.o-act { background: var(--good); }
+.obar .o-wit, .olegend i.o-wit { background: #e8ae1c; }
+.obar .o-cant, .olegend i.o-cant { background: var(--muted); }
+.obar .o-notmet, .olegend i.o-notmet { background: var(--bad); }
 .olegend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: -2px 0 6px; }
 .olegend span { cursor: help; }
 .olegend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
-.why.o1 b, .kpis .o1 b { color: #e8ae1c; }
-.why.o2 b, .kpis .o2 b { color: var(--muted); }
-.why.o3 b, .kpis .o3 b { color: var(--bad); }
+.why.o-wit b, .kpis .o-wit b { color: #e8ae1c; }
+.why.o-cant b, .kpis .o-cant b { color: var(--muted); }
+.why.o-notmet b, .kpis .o-notmet b { color: var(--bad); }
 .why .small { white-space: normal; max-width: 520px; }
 
 /* Skill details (SkillX expanded, skdetail, gdetail). */

@@ -7,41 +7,27 @@ use super::*;
 pub struct SkillFilter {
     pub q: String,
     pub effects: Vec<&'static str>,
-    /// "White" / "Gold" / "Unique" / "Inherited".
-    pub kinds: Vec<&'static str>,
+    pub kinds: Vec<Rarity>,
     pub tags: Vec<&'static str>,
 }
 
-const KINDS: [&str; 4] = ["White", "Gold", "Unique", "Inherited"];
-
 /// Groups of `SKILL_TAGS` (a skill must match one selected tag in every group that has a selection).
 const GROUPS: [(&str, &[&str]); 5] = [
-    ("Style", &["Front", "Pace", "Late", "End"]),
-    ("Distance", &["Sprint", "Mile", "Medium", "Long"]),
-    ("Surface", &["Turf", "Dirt"]),
-    ("Phase", &["Early race", "Mid race", "Late race", "Last spurt"]),
+    ("Style", &STYLES),
+    ("Distance", &DISTANCES),
+    ("Surface", &SURFACES),
+    ("Phase", &PHASES),
     ("Location", &["Corner", "Straight", "Uphill", "Downhill"]),
 ];
 
-fn group_of(tag: &str) -> &'static str {
-    GROUPS.iter().find(|g| g.1.contains(&tag)).map_or("Other", |g| g.0)
-}
-
-pub(super) fn kind(k: &SkillInfo) -> &'static str {
-    if k.inherited {
-        "Inherited"
-    } else if k.rarity >= 3 {
-        "Unique"
-    } else if k.rarity == 2 {
-        "Gold"
-    } else {
-        "White"
-    }
+/// The `GROUPS` entry `tag` is in; None = the Other row.
+fn group_of(tag: &str) -> Option<&'static str> {
+    GROUPS.iter().find(|g| g.1.contains(&tag)).map(|g| g.0)
 }
 
 /// Learnable by an uma wearing `card`: everything except other characters' (non-inherited) uniques.
 pub(super) fn learnable(k: &SkillInfo, card: i32) -> bool {
-    k.rarity < 3 || k.inherited || k.owner_card.is_none_or(|c| c == card)
+    !k.is_unique() || k.owner_card.is_none_or(|c| c == card)
 }
 
 pub(super) fn matches(f: &SkillFilter, k: &SkillInfo) -> bool {
@@ -49,13 +35,13 @@ pub(super) fn matches(f: &SkillFilter, k: &SkillInfo) -> bool {
     if !q.is_empty() && !k.name.to_lowercase().contains(&q) && !k.description.to_lowercase().contains(&q) {
         return false;
     }
-    if !f.kinds.is_empty() && !f.kinds.contains(&kind(k)) {
+    if !f.kinds.is_empty() && !f.kinds.contains(&k.kind()) {
         return false;
     }
     if !f.effects.is_empty() && !f.effects.iter().any(|e| k.effects.contains(e)) {
         return false;
     }
-    let mut groups: Vec<&str> = f.tags.iter().map(|t| group_of(t)).collect();
+    let mut groups: Vec<Option<&str>> = f.tags.iter().map(|t| group_of(t)).collect();
     groups.sort_unstable();
     groups.dedup();
     groups.iter().all(|g| f.tags.iter().filter(|t| group_of(t) == *g).any(|t| k.tags.contains(t)))
@@ -75,7 +61,7 @@ pub(super) fn toggle<T: PartialEq>(v: &mut Vec<T>, x: T) {
 pub fn SkillFilters(mut filter: Signal<SkillFilter>) -> Element {
     let f = filter.cloned();
     let mut rows: Vec<(&str, Vec<&'static str>)> = GROUPS.iter().map(|g| (g.0, g.1.to_vec())).collect();
-    rows.push(("Other", SKILL_TAGS.iter().copied().filter(|t| group_of(t) == "Other").collect()));
+    rows.push(("Other", SKILL_TAGS.iter().copied().filter(|t| group_of(t).is_none()).collect()));
     rows.retain(|r| !r.1.is_empty());
     let any = f != SkillFilter::default();
     rsx! {
@@ -93,8 +79,8 @@ pub fn SkillFilters(mut filter: Signal<SkillFilter>) -> Element {
             }
             div { class: "sf-row",
                 span { class: "sf-label", "Rarity" }
-                for k in KINDS {
-                    button { class: if f.kinds.contains(&k) { "chip-btn on" } else { "chip-btn" }, onclick: move |_| toggle(&mut filter.write().kinds, k), "{k}" }
+                for k in Rarity::ALL {
+                    button { class: if f.kinds.contains(&k) { "chip-btn on" } else { "chip-btn" }, onclick: move |_| toggle(&mut filter.write().kinds, k), "{k.label()}" }
                 }
             }
             div { class: "sf-row",

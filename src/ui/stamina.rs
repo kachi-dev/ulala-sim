@@ -1,12 +1,10 @@
 //! Stamina tab: the selected uma's last spurt and HP over many seeds, among NPCs or in her field, what stamina
 //! costs her in lengths, and what the field's stamina debuffs take.
 
-use super::results::{SPURT_KINDS, spurt_and_hp};
+use super::results::{spurt_and_hp, spurt_style};
 use super::*;
 use crate::charts::{CourseHist, PlaceChart, PlaceSeries, StripChart};
 
-/// `SPURT_KINDS` colours (the Spurt quality bars' `.kb-f.k*`).
-const KIND_COLORS: [&str; 5] = ["var(--good)", "var(--accent-2)", "#e8ae1c", "var(--accent)", "var(--bad)"];
 
 /// HP line (mean) with p25-p75 and p10-p90 bands, or a dashed mean line for the baseline.
 fn hp_series(h: &HorseStats, label: &str, dashed: bool) -> PlaceSeries {
@@ -124,10 +122,13 @@ fn StaminaResults() -> Element {
             delta(d, lower_better, txt(d.abs()))
         })
     };
-    let pp = |v: f32| format!("{:.1} pp", v * 100.0);
     let need = h.spurt_need_hp;
-    let strip: Vec<(String, String, Vec<f32>)> = (0..5u8)
-        .map(|k| (SPURT_KINDS[k as usize].0.to_string(), KIND_COLORS[k as usize].to_string(), r.st.loss.iter().filter(|x| x.1 == k).map(|x| x.0).collect()))
+    let strip: Vec<(String, String, Vec<f32>)> = SpurtKind::ALL
+        .into_iter()
+        .map(|k| {
+            let st = spurt_style(k);
+            (st.label.to_string(), st.color.to_string(), r.st.loss.iter().filter(|x| x.1 == k).map(|x| x.0).collect())
+        })
         .collect();
     let mut series: Vec<PlaceSeries> = b.map(|b| hp_series(b, "Baseline (mean)", true)).into_iter().collect();
     series.push(hp_series(h, if b.is_some() { "Edited (mean, p25-p75, p10-p90)" } else { "Mean, p25-p75, p10-p90" }, false));
@@ -180,7 +181,7 @@ fn Debuffs() -> Element {
     let lost: f32 = st.debuffs.iter().map(|d| d.hit_rate * d.hp_lost).sum();
     let (full, out) = (st.stats.full_spurt_rate, st.stats.hp_out_rate);
     let (full_m, out_m) = st.all_muted.unwrap_or((full, out));
-    let pp = |on: f32, off: f32, lower_better: bool| delta(on - off, lower_better, format!("{:.1} pp", (on - off).abs() * 100.0));
+    let pp = |on: f32, off: f32, lower_better: bool| pp_delta(off, on, lower_better);
     let colors = uma_colors(&RaceInput { horses: (*r.field).clone(), ..Default::default() }, None);
     rsx! {
         section { class: "card",
@@ -220,7 +221,7 @@ fn Debuffs() -> Element {
                                         td { div { class: "whobox", {horse_icon(o, Some(&colors[d.owner]), "sm")} b { "{chara_name(o.chara_id)}" } } }
                                         td { class: "num", "{pct(d.rate)}" }
                                         td { class: "num",
-                                            div { class: "kb-t hitbar", div { class: "kb-f k4", style: "width: {d.hit_rate * 100.0:.2}%" } }
+                                            div { class: "kb-t hitbar", div { class: "kb-f", style: "width: {d.hit_rate * 100.0:.2}%; background: var(--bad)" } }
                                             span { class: "hitv", "{pct(d.hit_rate)}" }
                                         }
                                         td { class: "num", if d.hit_rate > 0.0 { "-{d.hp_lost:.0} HP" } else { span { class: "muted", "-" } } }

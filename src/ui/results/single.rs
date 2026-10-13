@@ -2,13 +2,14 @@
 //! activations), and the focused uma's detail (Summary: over the course with events; Skills: activations and misses).
 
 use super::*;
-use super::detail::{UmaLinks, UmaPick};
+use super::detail::{UmaLinks, UmaPick, outcome_class};
 use crate::charts::*;
 
 pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Option<&Run>) -> Element {
     let (mut focus, mut detail_tab, mut run_tab) = (s.focus, s.detail_tab, s.run_tab);
-    // x1000's third tab (Stamina) has no Run once counterpart: Summary.
-    let (tab, rtab) = (if *detail_tab.read() == 1 { 1 } else { 0 }, *run_tab.read());
+    // A single run has only Summary and Skills: the batch-only subtabs show Summary.
+    let tab = if *detail_tab.read() == DetailTab::Skills { DetailTab::Skills } else { DetailTab::Summary };
+    let rtab = *run_tab.read();
     let n = cur.horses.len();
     let f = (*focus.read()).filter(|&f| f < n);
     let diffs = base.map(|b| diff_runs(b, cur));
@@ -54,11 +55,11 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                 if improved { img { class: "great", src: "/a/great.webp", alt: "Great!" } }
             }
             div { class: "seg small dtabs",
-                for (k, label) in ["Summary", "More"].into_iter().enumerate() {
-                    button { class: if rtab == k { "on" }, onclick: move |_| run_tab.set(k), "{label}" }
+                for (t, label) in [(RunTab::Summary, "Summary"), (RunTab::More, "More")] {
+                    button { class: if rtab == t { "on" }, onclick: move |_| run_tab.set(t), "{label}" }
                 }
             }
-            if rtab == 0 {
+            if rtab == RunTab::Summary {
                 div { class: "scroll-x",
                     table { class: "grid results",
                         thead {
@@ -180,11 +181,11 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                     button { class: "btn icon", title: "Close", onclick: move |_| focus.set(None), {icon("x")} }
                 }
                 div { class: "seg small dtabs",
-                    for (k, label) in ["Summary", "Skills"].into_iter().enumerate() {
-                        button { class: if tab == k { "on" }, onclick: move |_| detail_tab.set(k), "{label}" }
+                    for (t, label) in [(DetailTab::Summary, "Summary"), (DetailTab::Skills, "Skills")] {
+                        button { class: if tab == t { "on" }, onclick: move |_| detail_tab.set(t), "{label}" }
                     }
                 }
-                if tab == 1 {
+                if tab == DetailTab::Skills {
                     {activations(res, names, cur, Some(f))}
                 } else {
                     h4 { "Over the course" }
@@ -290,7 +291,7 @@ fn why(c: &SkillCheck, h: &HorseRun, goal: f32, n: usize) -> Element {
         SkillOutcome::NotMet { window: None } => ("Conditions never all held", cond()),
     };
     rsx! {
-        div { class: "why o{c.outcome.kind()}",
+        div { class: "why {outcome_class(c.outcome.kind())}",
             b { "{head}" }
             div { class: "muted small", "{detail}" }
         }
@@ -300,14 +301,14 @@ fn why(c: &SkillCheck, h: &HorseRun, goal: f32, n: usize) -> Element {
 /// "✓" for a full spurt, else "✗ (+metres late, -m/s below max)" with only what fell short, or "✗ (no spurt)".
 fn spurt_label(h: &HorseRun) -> (bool, String) {
     match h.spurt_kind {
-        0 => (true, "✓".into()),
-        4 => (false, "✗ (no spurt)".into()),
+        SpurtKind::Full => (true, "✓".into()),
+        SpurtKind::NoSpurt => (false, "✗ (no spurt)".into()),
         k => {
             let mut parts = vec![];
-            if k & 1 == 1 {
+            if k.delayed() {
                 parts.push(format!("+{:.1}m", h.spurt_delay));
             }
-            if k & 2 == 2 {
+            if k.reduced() {
                 parts.push(format!("-{:.2}", h.max_spurt_speed - h.spurt_speed));
             }
             (false, format!("✗ ({})", parts.join(", ")))

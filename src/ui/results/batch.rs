@@ -60,7 +60,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                                             b { "{pct(h.win_rate)}" }
                                             if let Some(d) = d {
                                                 if pct(d.win_rate.1) != pct(d.win_rate.0) {
-                                                    div { class: "was", "{pct(d.win_rate.0)} " {delta(d.win_rate.1 - d.win_rate.0, false, format!("{:.1} pp", (d.win_rate.1 - d.win_rate.0).abs() * 100.0))} }
+                                                    div { class: "was", "{pct(d.win_rate.0)} " {pp_delta(d.win_rate.0, d.win_rate.1, false)} }
                                                 }
                                             }
                                         }
@@ -79,7 +79,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                                                 if let Some(d) = d {
                                                     if pct(d.full_spurt_rate.1) != pct(d.full_spurt_rate.0) {
                                                         " "
-                                                        {delta(d.full_spurt_rate.1 - d.full_spurt_rate.0, false, format!("{:.1} pp", (d.full_spurt_rate.1 - d.full_spurt_rate.0).abs() * 100.0))}
+                                                        {pp_delta(d.full_spurt_rate.0, d.full_spurt_rate.1, false)}
                                                     }
                                                 }
                                             }

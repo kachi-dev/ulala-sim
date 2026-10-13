@@ -75,7 +75,7 @@ pub(super) fn parse_veterans(json: &[u8]) -> Result<Vec<Veteran>, String> {
 
 fn veteran(r: Row) -> Veteran {
     let horse = HorseInput {
-        chara_id: names().card.get(&r.card_id).map_or(r.card_id / 100, |c| c.1),
+        chara_id: names().card.get(&r.card_id).map_or(r.card_id / 100, |c| c.chara_id),
         card_id: r.card_id,
         speed: r.speed,
         stamina: r.stamina,

@@ -5,6 +5,17 @@ use super::*;
 use crate::charts::{GainBars, GainChart, Histogram};
 
 const CHART_ROWS: usize = 20;
+
+/// Sortable columns of the skill gains table.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum GainCol {
+    Skill,
+    Mean,
+    Median,
+    Min,
+    Max,
+    Activates,
+}
 /// Seeds for "Improve graph accuracy": one skill re-measured alone, for smoother detail charts.
 const ACCURACY_N: usize = 2000;
 
@@ -31,13 +42,6 @@ fn improve_accuracy(s: S, id: i32) {
     });
 }
 
-fn rarity_color(r: i32) -> &'static str {
-    match r {
-        ..=1 => "#63bfe9",
-        2 => "#e8ae1c",
-        _ => "#f0699b",
-    }
-}
 
 /// Detail charts of one measured gain (Uma ranking's too): lengths gained by where it activates, and gain per seed.
 pub(super) fn gain_charts(samples: &[f32], by_distance: &[(f32, f32)], color: &str, cv: &CourseView, what: &str) -> Element {
@@ -164,13 +168,13 @@ fn GainsResults() -> Element {
     let (col, desc) = *sort.read();
     let mut rows: Vec<(SkillInfo, &SkillGain)> = r.items.iter().map(|g| (skill_info(g.skill_id), g)).collect();
     let key = |g: &SkillGain| match col {
-        2 => g.lengths.p50,
-        3 => g.lengths.min,
-        4 => g.lengths.max,
-        5 => g.rate,
-        _ => g.lengths.mean,
+        GainCol::Skill | GainCol::Mean => g.lengths.mean,
+        GainCol::Median => g.lengths.p50,
+        GainCol::Min => g.lengths.min,
+        GainCol::Max => g.lengths.max,
+        GainCol::Activates => g.rate,
     };
-    if col == 0 {
+    if col == GainCol::Skill {
         rows.sort_by(|a, b| a.0.name.cmp(&b.0.name));
     } else {
         rows.sort_by(|a, b| key(a.1).total_cmp(&key(b.1)));
@@ -185,9 +189,10 @@ fn GainsResults() -> Element {
         .take(CHART_ROWS)
         .map(|g| {
             let k = skill_info(g.skill_id);
+            let color = rarity_color(&k).to_string();
             let name = if k.inherited { format!("{} (inherited)", k.name) } else { k.name };
             let l = &g.lengths;
-            (name, rarity_color(k.rarity).to_string(), [l.p10, l.p25, l.p50, l.p75, l.p90, l.mean], g.samples.len())
+            (name, color, [l.p10, l.p25, l.p50, l.p75, l.p90, l.mean], g.samples.len())
         })
         .collect();
     let selected = sel.cloned().and_then(|id| r.items.iter().find(|g| g.skill_id == id));
@@ -217,7 +222,7 @@ fn GainsResults() -> Element {
                     }
                 }
                 {skill_facts(g.skill_id, Some(r.cv.distance))}
-                {gain_charts(&g.samples, &g.by_distance, rarity_color(k.rarity), &r.cv, "it")}
+                {gain_charts(&g.samples, &g.by_distance, rarity_color(&k), &r.cv, "it")}
             }
         }
     });
@@ -251,12 +256,12 @@ fn GainsResults() -> Element {
                     table { class: "grid gains",
                         thead {
                             tr {
-                                {sort_th(sort, 0, "Skill", false, true)}
-                                {sort_th(sort, 1, "Mean", true, false)}
-                                {sort_th(sort, 2, "Median", true, false)}
-                                {sort_th(sort, 3, "Min", true, false)}
-                                {sort_th(sort, 4, "Max", true, false)}
-                                {sort_th(sort, 5, "Activates", true, false)}
+                                {sort_th(sort, GainCol::Skill, "Skill", false, true)}
+                                {sort_th(sort, GainCol::Mean, "Mean", true, false)}
+                                {sort_th(sort, GainCol::Median, "Median", true, false)}
+                                {sort_th(sort, GainCol::Min, "Min", true, false)}
+                                {sort_th(sort, GainCol::Max, "Max", true, false)}
+                                {sort_th(sort, GainCol::Activates, "Activates", true, false)}
                             }
                         }
                         tbody {

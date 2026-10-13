@@ -4,7 +4,7 @@ use std::sync::Arc;
 use uma_race_sim::api::{HorseInput, RaceInput, SkillInput};
 use uma_race_sim::data::{DataEra, GameData, corpus};
 use uma_race_sim::replay::Replay;
-use uma_race_sim::sim::{defs::RunningStyleEx, horse::running_style_ex};
+use uma_race_sim::sim::{defs::{RunningStyle, RunningStyleEx}, horse::running_style_ex};
 
 use super::{GROUNDS, SEASONS, SURFACES, SaveHead, TURNS, WEATHERS, course_info, cm_presets, game_data, names, pick};
 
@@ -55,24 +55,26 @@ pub fn new_race() -> Race {
     race
 }
 
+/// Aptitude grade A (`HorseInput` grades run 1 G ..= 8 S).
+pub const GRADE_A: i32 = 7;
+
 /// A custom horse wearing card `card_id`: its unique skill, default running style and aptitudes, endgame-ish stats.
 pub fn new_horse(race: &Race, card_id: i32) -> HorseInput {
     let c = names().card.get(&card_id);
-    let apt = |k: usize| c.map_or(7, |c| c.4[k]);
-    let unique = c.map_or(0, |c| c.2);
+    let unique = c.map_or(0, |c| c.unique_skill);
     HorseInput {
-        chara_id: c.map_or(card_id / 100, |c| c.1),
+        chara_id: c.map_or(card_id / 100, |c| c.chara_id),
         card_id,
         speed: 1200,
         stamina: 1000,
         pow: 1000,
         guts: 600,
         wiz: 1000,
-        running_style: c.map_or(2, |c| c.3),
+        running_style: c.map_or(RunningStyle::Senko as i32, |c| c.running_style),
         motivation: 5,
-        proper_distance: [apt(0), apt(1), apt(2), apt(3)],
-        proper_running_style: [apt(4), apt(5), apt(6), apt(7)],
-        proper_ground: [apt(8), apt(9)],
+        proper_distance: c.map_or([GRADE_A; 4], |c| c.proper_distance),
+        proper_running_style: c.map_or([GRADE_A; 4], |c| c.proper_running_style),
+        proper_ground: c.map_or([GRADE_A; 2], |c| c.proper_ground),
         skills: race.data.skills.contains_key(&unique).then_some(SkillInput { skill_id: unique, level: 4 }).into_iter().collect(),
         popularity: 1, // custom fields get distinct ones at run time, see `custom_popularity`
         // Real player: the dense frame window near the goal (recording only).
@@ -93,24 +95,24 @@ pub fn runaway(race: &Race, h: &HorseInput) -> bool {
 /// aptitudes and running style stay for a costume, and become the new uma's when the character changes.
 pub fn set_card(h: &mut HorseInput, card_id: i32) {
     let Some(c) = names().card.get(&card_id) else { return };
-    let old = names().card.get(&h.card_id).map(|o| o.2);
-    let has_new = h.skills.iter().any(|s| s.skill_id == c.2);
+    let old = names().card.get(&h.card_id).map(|o| o.unique_skill);
+    let new = c.unique_skill;
+    let has_new = h.skills.iter().any(|s| s.skill_id == new);
     match h.skills.iter().position(|s| Some(s.skill_id) == old) {
-        Some(i) if !has_new => h.skills[i].skill_id = c.2,
-        Some(i) if old != Some(c.2) => {
+        Some(i) if !has_new => h.skills[i].skill_id = new,
+        Some(i) if old != Some(new) => {
             h.skills.remove(i);
         }
-        None if !has_new => h.skills.push(SkillInput { skill_id: c.2, level: 4 }),
+        None if !has_new => h.skills.push(SkillInput { skill_id: new, level: 4 }),
         _ => {}
     }
-    if c.1 != h.chara_id {
-        let apt = |k: usize| c.4[k];
-        h.proper_distance = [apt(0), apt(1), apt(2), apt(3)];
-        h.proper_running_style = [apt(4), apt(5), apt(6), apt(7)];
-        h.proper_ground = [apt(8), apt(9)];
-        h.running_style = c.3;
+    if c.chara_id != h.chara_id {
+        h.proper_distance = c.proper_distance;
+        h.proper_running_style = c.proper_running_style;
+        h.proper_ground = c.proper_ground;
+        h.running_style = c.running_style;
     }
-    (h.card_id, h.chara_id) = (card_id, c.1);
+    (h.card_id, h.chara_id) = (card_id, c.chara_id);
 }
 
 /// Level for a skill a horse doesn't own yet: uniques at 4, everything else 1.

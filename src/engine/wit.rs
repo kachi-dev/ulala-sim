@@ -1,6 +1,6 @@
 use uma_race_sim::api::{RaceInput, WizAlt, span_kind, wiz_mechanic};
 
-use super::{HorseRun, Race, Work, gap_lengths, par_map, run_once};
+use super::{HorseRun, Race, SkillOutcome, Work, gap_lengths, par_map, run_once};
 
 /// `wiz_mechanic` bits in order, as the Wit tab names them.
 pub const WIT_MECHANICS: [&str; wiz_mechanic::COUNT] = ["Section rolls", "Position keep", "Spurt candidates", "Skills", "Rushed", "Downhill", "Course bonus"];
@@ -40,15 +40,17 @@ pub struct WitPair {
 /// The Wit tab's measurement of one horse.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Wit {
-    /// Per `wiz_mechanic` bit, then all of them at once: the pair per seed.
+    /// Per `wiz_mechanic` bit (`rows[k]` is bit `1 << k`): the pair per seed.
     pub rows: Vec<Vec<WitPair>>,
+    /// Every mechanic at once: the whole Wit change.
+    pub all: Vec<WitPair>,
 }
 
 fn sample(h: &HorseRun) -> WitSample {
     WitSample {
         full_spurt: h.full_spurt,
         rushed: h.state_time[span_kind::RUSHED as usize] > 0.0,
-        skills: h.skills.iter().filter(|c| c.outcome.kind() == 0).count() as u8,
+        skills: h.skills.iter().filter(|c| c.outcome == SkillOutcome::Activated).count() as u8,
         spurt_start: h.spurt_start,
         modes: WIT_MODES.map(|(k, _)| h.state_time[k as usize]),
     }
@@ -79,5 +81,6 @@ pub fn wit(race: &Race, input: &RaceInput, i: usize, old_wiz: i32, seeds: &[i32]
             })
             .collect::<Vec<_>>()
     });
-    Wit { rows: (0..masks.len()).map(|k| res.iter().map(|r| r.1[k]).collect()).collect() }
+    let column = |k: usize| res.iter().map(|r| r.1[k]).collect();
+    Wit { rows: (0..wiz_mechanic::COUNT).map(column).collect(), all: column(wiz_mechanic::COUNT) }
 }

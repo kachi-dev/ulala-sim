@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 
 use uma_race_sim::api::RaceInput;
 
-use super::{Activation, HorseRun, Race, run_once};
+use super::{Activation, HorseRun, OutcomeKind, Race, SpurtKind, run_once};
 
 /// `n` seeds: `s` first, then deterministic pseudo-random ones derived from it.
 pub fn seeds(s: i32, n: usize) -> Vec<i32> {
@@ -90,7 +90,7 @@ pub struct SkillStat {
     pub rate: f32,
     /// Activation distances over all runs (for a strip/histogram plot).
     pub distances: Vec<f32>,
-    /// Fraction of runs per `SkillOutcome::kind` (activated, wit check, can't here, conditions not met).
+    /// Fraction of runs per `OutcomeKind` (indexed by `kind as usize`).
     pub outcomes: [f32; 4],
 }
 
@@ -121,7 +121,7 @@ pub struct HorseStats {
     pub places: Vec<u8>,
     /// Speed at the goal (m/s) per seed: turns paired time differences into lengths (`diff_batches`).
     pub goal_speeds: Vec<f32>,
-    /// Fractions of runs per `HorseRun::spurt_kind` (full, delayed, reduced, delayed + reduced, none).
+    /// Fractions of runs per `HorseRun::spurt_kind`, in `SpurtKind::ALL` order.
     pub spurt_kinds: [f32; 5],
     /// spurt_start − final-leg start (m), per seed that spurted.
     pub spurt_delays: Vec<f32>,
@@ -137,13 +137,14 @@ pub struct Batch {
     pub horses: Vec<HorseStats>,
 }
 
-/// Fractions of `runs` per `SkillOutcome::kind` for skill `id`. A disabled skill's conditions are never checked, so a
-/// lost wit roll hides "can't here"; fixed conditions are the same every seed, so then those runs can't either.
+/// Fractions of `runs` per `OutcomeKind` for skill `id`. A disabled skill's conditions are never checked, so a lost
+/// wit roll hides "can't here"; fixed conditions are the same every seed, so then those runs can't either.
 fn outcomes(runs: &[&HorseRun], id: i32) -> [f32; 4] {
     let k = runs.len().max(1) as f32;
-    let mut o: [f32; 4] = std::array::from_fn(|kind| runs.iter().filter(|x| x.skills.iter().any(|c| c.skill_id == id && c.outcome.kind() == kind)).count() as f32 / k);
-    if o[2] > 0.0 {
-        (o[2], o[1]) = (o[2] + o[1], 0.0);
+    let mut o = OutcomeKind::ALL.map(|kind| runs.iter().filter(|x| x.skills.iter().any(|c| c.skill_id == id && c.outcome.kind() == kind)).count() as f32 / k);
+    let (cant, wit) = (OutcomeKind::CantHere as usize, OutcomeKind::WitCheck as usize);
+    if o[cant] > 0.0 {
+        (o[cant], o[wit]) = (o[cant] + o[wit], 0.0);
     }
     o
 }
@@ -203,8 +204,8 @@ pub(super) fn summarize(input: &RaceInput, seeds: &[i32], runs: &[(Vec<HorseRun>
                 times: hr.iter().map(|x| x.finish_time).collect(),
                 places: hr.iter().map(|x| x.place as u8).collect(),
                 goal_speeds: hr.iter().map(|x| x.goal_speed).collect(),
-                spurt_kinds: std::array::from_fn(|kind| rate(&|x| x.spurt_kind as usize == kind)),
-                spurt_delays: hr.iter().filter(|x| x.spurt_kind < 4).map(|x| x.spurt_delay).collect(),
+                spurt_kinds: SpurtKind::ALL.map(|kind| rate(&|x| x.spurt_kind == kind)),
+                spurt_delays: hr.iter().filter(|x| x.spurt_kind != SpurtKind::NoSpurt).map(|x| x.spurt_delay).collect(),
                 hp_out_distances: hr.iter().filter_map(|x| x.hp_out_at).collect(),
                 states: std::array::from_fn(|kind| {
                     let t: Vec<f32> = hr.iter().map(|x| x.state_time[kind]).filter(|&t| t > 0.0).collect();

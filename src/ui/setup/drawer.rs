@@ -92,7 +92,7 @@ pub fn Picker() -> Element {
 const VET_SORTS: [&str; 8] = ["Newest", "Oldest", "Rating", "Speed", "Stamina", "Power", "Guts", "Wit"];
 /// Aptitude rows of the veteran cards and filters; `vet_apts` order.
 const APT_ROWS: [(&str, usize, &[&str]); 3] =
-    [("Surface", 0, &["Turf", "Dirt"]), ("Distance", 2, &["Sprint", "Mile", "Medium", "Long"]), ("Style", 6, &["Front", "Pace", "Late", "End"])];
+    [("Surface", 0, &SURFACES), ("Distance", 2, &DISTANCES), ("Style", 6, &STYLES)];
 
 /// Turf, Dirt, Sprint … Long, Front … End.
 fn vet_apts(h: &HorseInput) -> [i32; 10] {
@@ -416,8 +416,8 @@ pub fn Drawer() -> Element {
                         select {
                             // Runaway (Oonige) isn't picked here: the sim derives it from a Front runner's skills.
                             onchange: move |e| edit(s, i, |h| h.running_style = e.value().parse().unwrap_or(1)),
-                            for (v, name) in STYLES.iter().enumerate().skip(1) {
-                                option { value: "{v}", selected: h.running_style == v as i32, "{name}" }
+                            for (v, name) in (1..).zip(STYLES) {
+                                option { value: "{v}", selected: h.running_style == v, "{name}" }
                             }
                         }
                     }

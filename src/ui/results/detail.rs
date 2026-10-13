@@ -68,7 +68,6 @@ pub(super) fn horse_detail(
             delta(d, lower_better, txt(d.abs()))
         })
     };
-    let pp = |v: f32| format!("{:.1} pp", v * 100.0);
     // Race events the uma was ever in, here or on the baseline.
     let events: Vec<&RaceEvent> = EVENTS.iter().filter(|e| h.states[e.kind as usize].0 > 0.0 || b.is_some_and(|b| b.states[e.kind as usize].0 > 0.0)).collect();
     let strip: Vec<(String, String, Vec<f32>)> =
@@ -85,13 +84,13 @@ pub(super) fn horse_detail(
             }
             div { class: "dtabs-row",
                 div { class: "seg small dtabs",
-                    for (k, label) in ["Summary", "Skills", "Stamina", "Wit"].into_iter().enumerate() {
+                    for (t, label) in [(DetailTab::Summary, "Summary"), (DetailTab::Skills, "Skills"), (DetailTab::Stamina, "Stamina"), (DetailTab::Wit, "Wit")] {
                         button {
-                            class: if tab == k { "on" },
+                            class: if tab == t { "on" },
                             onclick: move |_| {
-                                detail_tab.set(k);
+                                detail_tab.set(t);
                                 // The open skill also marks the course map; it belongs to the Skills tab.
-                                if k != 1 {
+                                if t != DetailTab::Skills {
                                     skill_sel.set(None);
                                 }
                             },
@@ -99,11 +98,11 @@ pub(super) fn horse_detail(
                         }
                     }
                 }
-                if let (3, Some(old)) = (tab, old_wiz) {
+                if let (DetailTab::Wit, Some(old)) = (tab, old_wiz) {
                     crate::ui::wit::WitRun { i, old }
                 }
             }
-            if tab == 0 {
+            if tab == DetailTab::Summary {
                 div { class: "kpirow",
                     div { class: "kpis",
                         div { b { "{pct(h.win_rate)}" } div { class: "kpi2", span { "win" } {vs(&|x| x.win_rate, false, pp)} } }
@@ -151,19 +150,19 @@ pub(super) fn horse_detail(
                     straights: cv.straights.iter().map(|c| (c.start, c.end)).collect::<Vec<_>>(),
                 }
             }
-            if tab == 2 {
+            if tab == DetailTab::Stamina {
                 {spurt_and_hp(h, cv, &color)}
             }
-            if tab == 3 {
+            if tab == DetailTab::Wit {
                 {crate::ui::wit::wit_cards(h, b, diff)}
                 if let Some(old) = old_wiz {
                     crate::ui::wit::WitOut { i, old }
                 }
             }
-            if tab == 1 {
+            if tab == DetailTab::Skills {
                 div { class: "olegend muted small",
-                    for (k, (label, hint)) in OUTCOMES.iter().enumerate() {
-                        span { title: "{hint}", i { class: "o{k}" } "{label}" }
+                    for k in OutcomeKind::ALL {
+                        span { title: "{k.hint()}", i { class: outcome_class(k) } "{k.label()}" }
                     }
                 }
                 div { class: "cols",
@@ -273,13 +272,23 @@ pub(super) fn UmaPick(i: usize) -> Element {
     }
 }
 
-/// Stacked bar of `SkillStat::outcomes`, one color per `OUTCOMES` entry.
+/// CSS class colouring an `OutcomeKind` (bar segment, legend swatch, reason text).
+pub(in crate::ui) fn outcome_class(k: OutcomeKind) -> &'static str {
+    match k {
+        OutcomeKind::Activated => "o-act",
+        OutcomeKind::WitCheck => "o-wit",
+        OutcomeKind::CantHere => "o-cant",
+        OutcomeKind::NotMet => "o-notmet",
+    }
+}
+
+/// Stacked bar of `SkillStat::outcomes`, one color per `OutcomeKind`.
 fn outcome_bar(o: &[f32; 4]) -> Element {
     rsx! {
         div { class: "obar",
-            for (k, f) in o.iter().enumerate() {
+            for (k, f) in OutcomeKind::ALL.into_iter().zip(o) {
                 if *f > 0.0 {
-                    div { class: "o{k}", style: "width: {f * 100.0:.2}%", title: "{OUTCOMES[k].0}: {pct(*f)}. {OUTCOMES[k].1}." }
+                    div { class: outcome_class(k), style: "width: {f * 100.0:.2}%", title: "{k.label()}: {pct(*f)}. {k.hint()}." }
                 }
             }
         }
@@ -343,9 +352,9 @@ fn skill_detail(st: &SkillStat, cv: &CourseView, color: &str, mut skill_sel: Sig
                     div { b { "{median:.0} m" } span { "median point" } }
                     div { b { "{d[0]:.0} to {d[d.len() - 1]:.0} m" } span { "earliest to latest" } }
                 }
-                for k in 1..OUTCOMES.len() {
-                    if st.outcomes[k] > 0.0 {
-                        div { class: "o{k}", title: "{OUTCOMES[k].1}", b { "{pct(st.outcomes[k])}" } span { "{OUTCOMES[k].0.to_lowercase()}" } }
+                for (k, f) in OutcomeKind::ALL.into_iter().zip(st.outcomes) {
+                    if k != OutcomeKind::Activated && f > 0.0 {
+                        div { class: outcome_class(k), title: "{k.hint()}", b { "{pct(f)}" } span { "{k.label().to_lowercase()}" } }
                     }
                 }
             }
@@ -391,18 +400,28 @@ fn vs_baseline(d: &BatchDiff, edited: bool, color: &str) -> Element {
     }
 }
 
-pub(in crate::ui) const SPURT_KINDS: [(&str, &str); 5] = [
-    ("Full spurt", "Max spurt speed from the final-leg start"),
-    ("Delayed", "Max speed, but started after the final-leg start"),
-    ("Reduced", "Started on time, but at less than max speed (not a full spurt)"),
-    ("Delayed + reduced", "Started late and below max speed"),
-    ("No spurt", "Never switched to a last spurt"),
-];
+/// A spurt kind as the results show it.
+pub(in crate::ui) struct SpurtStyle {
+    pub label: &'static str,
+    pub hint: &'static str,
+    pub color: &'static str,
+}
+
+pub(in crate::ui) fn spurt_style(k: SpurtKind) -> SpurtStyle {
+    let (label, hint, color) = match k {
+        SpurtKind::Full => ("Full spurt", "Max spurt speed from the final-leg start", "var(--good)"),
+        SpurtKind::Delayed => ("Delayed", "Max speed, but started after the final-leg start", "var(--accent-2)"),
+        SpurtKind::Reduced => ("Reduced", "Started on time, but at less than max speed (not a full spurt)", "#e8ae1c"),
+        SpurtKind::DelayedReduced => ("Delayed + reduced", "Started late and below max speed", "var(--accent)"),
+        SpurtKind::NoSpurt => ("No spurt", "Never switched to a last spurt", "var(--bad)"),
+    };
+    SpurtStyle { label, hint, color }
+}
 
 /// Batch uma detail: when the last spurt starts vs the expected point, how good it was, and HP left at the goal.
 pub(in crate::ui) fn spurt_and_hp(h: &HorseStats, cv: &CourseView, color: &str) -> Element {
     let fl = cv.final_leg_start;
-    let on_time = h.spurt_kinds[0] + h.spurt_kinds[2];
+    let on_time: f32 = SpurtKind::ALL.iter().zip(h.spurt_kinds).filter(|(k, _)| **k != SpurtKind::NoSpurt && !k.delayed()).map(|x| x.1).sum();
     let mut late: Vec<f32> = h.spurt_delays.iter().copied().filter(|&d| d > SPURT_ON_TIME_M).collect();
     late.sort_by(f32::total_cmp);
     let med_late = late.get(late.len() / 2).copied();
@@ -426,12 +445,17 @@ pub(in crate::ui) fn spurt_and_hp(h: &HorseStats, cv: &CourseView, color: &str) 
             div { class: "sp-kind",
                 h4 { "Spurt quality" }
                 div { class: "kindbars",
-                    for (k, f) in h.spurt_kinds.iter().enumerate() {
-                        if *f > 0.0 {
-                            div { class: "kb", title: "{SPURT_KINDS[k].1}",
-                                span { class: "kb-l", "{SPURT_KINDS[k].0}" }
-                                div { class: "kb-t", div { class: "kb-f k{k}", style: "width: {f * 100.0:.2}%" } }
-                                b { class: "kb-v", "{pct(*f)}" }
+                    for (k, f) in SpurtKind::ALL.into_iter().zip(h.spurt_kinds) {
+                        if f > 0.0 {
+                            {
+                                let st = spurt_style(k);
+                                rsx! {
+                                    div { class: "kb", title: "{st.hint}",
+                                        span { class: "kb-l", "{st.label}" }
+                                        div { class: "kb-t", div { class: "kb-f", style: "width: {f * 100.0:.2}%; background: {st.color}" } }
+                                        b { class: "kb-v", "{pct(f)}" }
+                                    }
+                                }
                             }
                         }
                     }

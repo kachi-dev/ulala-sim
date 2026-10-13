@@ -39,7 +39,6 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     ("nunito.woff2", "font/woff2", include_bytes!("../../assets/font/nunito.woff2")),
 ];
 
-const STYLES: [&str; 5] = ["?", "Front", "Pace", "Late", "End"];
 const MOODS: [&str; 6] = ["?", "Awful", "Bad", "Normal", "Good", "Great"];
 const GRADES: [&str; 9] = ["?", "G", "F", "E", "D", "C", "B", "A", "S"];
 const STATS: [&str; 5] = ["Speed", "Stamina", "Power", "Guts", "Wit"];
@@ -55,6 +54,22 @@ enum Tab {
     Gains,
     Ranking,
     Stamina,
+}
+
+/// Subtabs of an uma's detail in the results (a single run has only Summary and Skills).
+#[derive(Clone, Copy, PartialEq)]
+enum DetailTab {
+    Summary,
+    Skills,
+    Stamina,
+    Wit,
+}
+
+/// Single-run result tabs: the table, or every uma's positions and skill activations.
+#[derive(Clone, Copy, PartialEq)]
+enum RunTab {
+    Summary,
+    More,
 }
 
 #[derive(Clone)]
@@ -178,10 +193,9 @@ struct S {
     focus: Signal<Option<usize>>,
     /// (horse, skill) open in the batch uma detail: fine activation view + its region on the pinned course.
     skill_sel: Signal<Option<(usize, i32)>>,
-    /// Batch uma detail tab: 0 Summary, 1 Skills, 2 Stamina (kept when another uma is shown).
-    detail_tab: Signal<usize>,
-    /// Single-run result tab: 0 Summary (the table), 1 More (every uma's positions and skill activations).
-    run_tab: Signal<usize>,
+    /// Uma detail subtab (kept when another uma is shown).
+    detail_tab: Signal<DetailTab>,
+    run_tab: Signal<RunTab>,
     editing: Signal<Option<usize>>,
     /// The skill picker over the edit drawer (the card's "Add skill" opens both).
     skill_pick: Signal<bool>,
@@ -206,7 +220,7 @@ struct S {
     r_q: Signal<String>,
     r_n: Signal<usize>,
     r_res: Signal<Option<RankRes>>,
-    r_sort: Signal<(usize, bool)>,
+    r_sort: Signal<(ranking::RankCol, bool)>,
     r_sel: Signal<Option<(i32, i32)>>,
     r_matrix: Signal<bool>,
     // Stamina tab
@@ -223,7 +237,7 @@ struct S {
     w_sel: Signal<Option<usize>>,
     g_n: Signal<usize>,
     g_res: Signal<Option<GainsRes>>,
-    g_sort: Signal<(usize, bool)>,
+    g_sort: Signal<(gains::GainCol, bool)>,
     g_sel: Signal<Option<i32>>,
     /// Measured horse-races per second per worker thread (for the time estimate).
     g_rate: Signal<f32>,
@@ -270,8 +284,8 @@ pub fn App() -> Element {
         sel: use_signal(|| 0),
         focus: use_signal(|| None),
         skill_sel: use_signal(|| None),
-        detail_tab: use_signal(|| 0),
-        run_tab: use_signal(|| 0),
+        detail_tab: use_signal(|| DetailTab::Summary),
+        run_tab: use_signal(|| RunTab::Summary),
         editing: use_signal(|| None),
         skill_pick: use_signal(|| false),
         picker: use_signal(|| false),
@@ -279,7 +293,7 @@ pub fn App() -> Element {
         job: use_signal(|| None),
         err: use_signal(|| None),
         n: use_signal(|| 1000),
-        g_filter: use_signal(|| skills::SkillFilter { kinds: vec!["Gold"], ..Default::default() }),
+        g_filter: use_signal(|| skills::SkillFilter { kinds: vec![Rarity::Gold], ..Default::default() }),
         g_owned: use_signal(|| false),
         g_npc: use_signal(|| None),
         npc_lobby: use_signal(|| 2),
@@ -289,7 +303,7 @@ pub fn App() -> Element {
         r_q: use_signal(String::new),
         r_n: use_signal(|| 100),
         r_res: use_signal(|| None),
-        r_sort: use_signal(|| (1, true)),
+        r_sort: use_signal(|| (ranking::RankCol::Mean, true)),
         r_sel: use_signal(|| None),
         r_matrix: use_signal(|| true),
         st_npc: use_signal(|| None),
@@ -301,7 +315,7 @@ pub fn App() -> Element {
         w_sel: use_signal(|| None),
         g_n: use_signal(|| 200),
         g_res: use_signal(|| None),
-        g_sort: use_signal(|| (1, true)),
+        g_sort: use_signal(|| (gains::GainCol::Mean, true)),
         g_sel: use_signal(|| None),
         g_rate: use_signal(|| 500.0),
         cpu: use_signal(cpu_pref),

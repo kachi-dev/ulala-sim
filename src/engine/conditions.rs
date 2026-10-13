@@ -285,30 +285,35 @@ fn effect_text(a: &SkillAbilityData) -> String {
         let s = format!("{x:+.3}");
         s.trim_end_matches('0').trim_end_matches('.').to_string()
     };
+    use super::ability_type as t;
     let s = match a.ability_type {
-        t @ 1..=5 => format!("{} {}", ["Speed", "Stamina", "Power", "Guts", "Wit"][t as usize - 1], f(v)),
-        32 => format!("All stats {}", f(v)),
-        7 => format!("HP use ×{}", f(v).trim_start_matches('+')),
-        8 => format!("Vision {} m", f(v)),
-        9 => format!("HP {}%", f(v * 100.0)),
-        10 => format!("Start delay ×{}", f(v).trim_start_matches('+')),
-        11 => "Moves inside".into(),
-        12 => "Moves outside".into(),
-        13 => "Ends rushing".into(),
-        14 => "Fixes start delay".into(),
-        21 => format!("Current speed {} m/s", f(v)),
-        22 => format!("Current speed {} m/s (fading)", f(v)),
-        27 => format!("Target speed {} m/s", f(v)),
-        28 => format!("Lane change speed {}", f(v)),
-        29 => format!("Rushing chance {}", f(v)),
-        30 => format!("Push {}", f(v)),
-        31 => format!("Accel {} m/s²", f(v)),
-        35 => format!("Target lane {}", f(v)),
-        36 | 37 => format!("Activates {} random skills", v as i32),
-        38 => "Cancels debuffs".into(),
-        t => format!("Type {t} {}", f(v)),
+        t::SPEED => format!("Speed {}", f(v)),
+        t::STAMINA => format!("Stamina {}", f(v)),
+        t::POWER => format!("Power {}", f(v)),
+        t::GUTS => format!("Guts {}", f(v)),
+        t::WIZ => format!("Wit {}", f(v)),
+        t::ALL_STATS => format!("All stats {}", f(v)),
+        t::HP_USE_RATE => format!("HP use ×{}", f(v).trim_start_matches('+')),
+        t::VISION => format!("Vision {} m", f(v)),
+        t::HP => format!("HP {}%", f(v * 100.0)),
+        t::START_DELAY_SCALE => format!("Start delay ×{}", f(v).trim_start_matches('+')),
+        t::MOVE_INSIDE => "Moves inside".into(),
+        t::MOVE_OUTSIDE => "Moves outside".into(),
+        t::END_RUSHING => "Ends rushing".into(),
+        t::START_DELAY_FIX => "Fixes start delay".into(),
+        t::CURRENT_SPEED => format!("Current speed {} m/s", f(v)),
+        t::CURRENT_SPEED_FADING => format!("Current speed {} m/s (fading)", f(v)),
+        t::TARGET_SPEED => format!("Target speed {} m/s", f(v)),
+        t::LANE_CHANGE_SPEED => format!("Lane change speed {}", f(v)),
+        t::RUSHING_CHANCE => format!("Rushing chance {}", f(v)),
+        t::PUSH => format!("Push {}", f(v)),
+        t::ACCEL => format!("Accel {} m/s²", f(v)),
+        t::TARGET_LANE => format!("Target lane {}", f(v)),
+        t::RANDOM_SKILLS | t::RANDOM_RARE_SKILLS => format!("Activates {} random skills", v as i32),
+        t::CANCEL_DEBUFFS => "Cancels debuffs".into(),
+        k => format!("Type {k} {}", f(v)),
     };
-    let target = if !matches!(a.target_type, 0 | 1) { " (others)" } else { "" };
+    let target = if !matches!(a.target_type, 0 | super::target_type::SELF) { " (others)" } else { "" };
     let scaled = if a.ability_value_usage > 1 { " (scaled)" } else { "" };
     format!("{s}{target}{scaled}")
 }

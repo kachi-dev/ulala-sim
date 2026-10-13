@@ -216,7 +216,7 @@ pub(super) fn add_skill(s: S, i: usize, k: SkillInput) {
 
 /// `k` as newly learned: uniques at level 4, the rest at 1.
 pub(super) fn learned(k: &SkillInfo) -> SkillInput {
-    SkillInput { skill_id: k.id, level: if k.rarity >= 3 && !k.inherited { 4 } else { 1 } }
+    SkillInput { skill_id: k.id, level: if k.is_unique() { 4 } else { 1 } }
 }
 
 pub(super) fn edit_race(mut s: S, f: impl FnOnce(&mut RaceInput)) {

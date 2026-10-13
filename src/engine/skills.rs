@@ -3,7 +3,45 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use uma_race_sim::data::{DataEra, GameData, SkillData};
 
-use super::{DISTANCES, PHASES, Race, STYLES, SURFACES, SkillInput, SkillName, game_data, names, pick};
+use super::{DISTANCES, PHASES, Race, STYLES, SURFACES, SkillInput, game_data, names, pick};
+
+/// `skill_data` ability types, as the sim's `skill::ability::activate` applies them.
+pub mod ability_type {
+    pub const SPEED: i32 = 1;
+    pub const STAMINA: i32 = 2;
+    pub const POWER: i32 = 3;
+    pub const GUTS: i32 = 4;
+    pub const WIZ: i32 = 5;
+    /// Sets the running style to Runaway (RunningStyleExOonige).
+    pub const RUNAWAY: i32 = 6;
+    pub const HP_USE_RATE: i32 = 7;
+    pub const VISION: i32 = 8;
+    /// Heals (or drains) a share of max HP.
+    pub const HP: i32 = 9;
+    pub const START_DELAY_SCALE: i32 = 10;
+    pub const MOVE_INSIDE: i32 = 11;
+    pub const MOVE_OUTSIDE: i32 = 12;
+    pub const END_RUSHING: i32 = 13;
+    pub const START_DELAY_FIX: i32 = 14;
+    pub const CURRENT_SPEED: i32 = 21;
+    pub const CURRENT_SPEED_FADING: i32 = 22;
+    pub const TARGET_SPEED: i32 = 27;
+    pub const LANE_CHANGE_SPEED: i32 = 28;
+    pub const RUSHING_CHANCE: i32 = 29;
+    pub const PUSH: i32 = 30;
+    pub const ACCEL: i32 = 31;
+    pub const ALL_STATS: i32 = 32;
+    pub const TARGET_LANE: i32 = 35;
+    pub const RANDOM_SKILLS: i32 = 36;
+    pub const RANDOM_RARE_SKILLS: i32 = 37;
+    pub const CANCEL_DEBUFFS: i32 = 38;
+}
+
+/// `skill_data` ability target types the app tells apart (0 = none).
+pub mod target_type {
+    /// The owner itself.
+    pub const SELF: i32 = 1;
+}
 
 /// Skill display info.
 #[derive(Clone, Debug, PartialEq)]
@@ -23,6 +61,48 @@ pub struct SkillInfo {
     pub inherited: bool,
     /// For uniques (and their inherited versions): the card it belongs to.
     pub owner_card: Option<i32>,
+}
+
+/// A skill's rarity as the app groups it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rarity {
+    White,
+    Gold,
+    Unique,
+    /// The inherited version of a unique.
+    Inherited,
+}
+
+impl Rarity {
+    pub const ALL: [Rarity; 4] = [Rarity::White, Rarity::Gold, Rarity::Unique, Rarity::Inherited];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Rarity::White => "White",
+            Rarity::Gold => "Gold",
+            Rarity::Unique => "Unique",
+            Rarity::Inherited => "Inherited",
+        }
+    }
+}
+
+impl SkillInfo {
+    pub fn kind(&self) -> Rarity {
+        if self.inherited {
+            Rarity::Inherited
+        } else if self.rarity >= 3 {
+            Rarity::Unique
+        } else if self.rarity == 2 {
+            Rarity::Gold
+        } else {
+            Rarity::White
+        }
+    }
+
+    /// A unique (evolved ones too), not its inherited version.
+    pub fn is_unique(&self) -> bool {
+        self.kind() == Rarity::Unique
+    }
 }
 
 /// Every `SkillInfo::effects` value. "Debuff" = harmful to other horses ("Stamina drain" = an HP debuff), "Negative" =
@@ -45,7 +125,7 @@ pub fn skill_info(id: i32) -> SkillInfo {
 /// An uma's skills (with their index) in the game's list order: skill_data.disp_order ascending, ties as given
 /// (the client's `PartsSingleModeSkillList` sorts with a stable OrderBy on it). Display only: the sim's order stays.
 pub fn game_order(skills: &[SkillInput]) -> Vec<(usize, SkillInput)> {
-    let order = |id: i32| names().skill.get(&id).map_or(i32::MAX, |s| s.4);
+    let order = |id: i32| names().skill.get(&id).map_or(i32::MAX, |s| s.disp_order);
     let mut v: Vec<(usize, SkillInput)> = skills.iter().copied().enumerate().collect();
     v.sort_by_key(|&(_, k)| order(k.skill_id));
     v
@@ -82,7 +162,7 @@ fn skill_table(data: &GameData) -> Arc<SkillTable> {
 fn describe(id: i32, sd: Option<&SkillData>) -> SkillInfo {
     let n = names();
     let (name, description, rarity, icon_id) = match n.skill.get(&id) {
-        Some(SkillName(a, b, c, d, _)) => (a.clone(), b.clone(), *c, *d),
+        Some(s) => (s.name.clone(), s.description.clone(), s.rarity, s.icon_id),
         None => (format!("Skill {id}"), String::new(), 0, 0),
     };
     let mut effects = Vec::new();
@@ -94,29 +174,30 @@ fn describe(id: i32, sd: Option<&SkillData>) -> SkillInfo {
     };
     for d in sd.map_or(&[][..], |s| &s.details[..]) {
         for a in d.abilities.iter().filter(|a| a.ability_type != 0) {
-            // The sim's demerit flag is always set for 13 / 14 (rushing time, start delay fix): harmful only on others.
+            use ability_type as t;
+            // The sim's demerit flag is always set for END_RUSHING / START_DELAY_FIX: harmful only on others.
             let harmful = match a.ability_type {
-                13 | 14 => a.target_type != 1,
-                t => uma_race_sim::sim::skill::is_skill_demerit(t, a.float_ability_value as f32 * 0.0001),
+                t::END_RUSHING | t::START_DELAY_FIX => a.target_type != target_type::SELF,
+                k => uma_race_sim::sim::skill::is_skill_demerit(k, a.float_ability_value as f32 * 0.0001),
             };
-            match (harmful, a.target_type) {
-                (true, 1) => add(&mut effects, "Negative"),
-                (true, _) => {
-                    add(&mut effects, "Debuff");
-                    if a.ability_type == 9 {
-                        add(&mut effects, "Stamina drain");
-                    }
+            if harmful && a.target_type == target_type::SELF {
+                add(&mut effects, "Negative");
+            } else if harmful {
+                add(&mut effects, "Debuff");
+                if a.ability_type == t::HP {
+                    add(&mut effects, "Stamina drain");
                 }
-                _ => add(&mut effects, match a.ability_type {
-                    21 | 22 | 27 => "Speed",
-                    31 => "Acceleration",
-                    7 | 9 => "Recovery",
-                    1..=5 | 32 => "Stats",
-                    11 | 12 | 28 | 35 => "Lane",
-                    8 => "Vision",
-                    10 | 14 => "Start",
+            } else {
+                add(&mut effects, match a.ability_type {
+                    t::CURRENT_SPEED | t::CURRENT_SPEED_FADING | t::TARGET_SPEED => "Speed",
+                    t::ACCEL => "Acceleration",
+                    t::HP_USE_RATE | t::HP => "Recovery",
+                    t::SPEED | t::STAMINA | t::POWER | t::GUTS | t::WIZ | t::ALL_STATS => "Stats",
+                    t::MOVE_INSIDE | t::MOVE_OUTSIDE | t::LANE_CHANGE_SPEED | t::TARGET_LANE => "Lane",
+                    t::VISION => "Vision",
+                    t::START_DELAY_SCALE | t::START_DELAY_FIX => "Start",
                     _ => "Other",
-                }),
+                });
             }
         }
         for t in d.precondition.split(['&', '@']).chain(d.condition.split(['&', '@'])) {
@@ -169,6 +250,6 @@ fn describe(id: i32, sd: Option<&SkillData>) -> SkillInfo {
     // 9xxxxx = the inherited version of unique 1xxxxx (900521 ↔ 100521).
     let inherited = (900_000..1_000_000).contains(&id);
     let unique = if inherited { id - 800_000 } else { id };
-    let owner_card = n.card.iter().find(|(_, c)| c.2 == unique).map(|(&k, _)| k);
+    let owner_card = n.card.iter().find(|(_, c)| c.unique_skill == unique).map(|(&k, _)| k);
     SkillInfo { id, name, description, rarity, icon_id, effects, tags, inherited: inherited && owner_card.is_some(), owner_card }
 }

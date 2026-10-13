@@ -1,4 +1,4 @@
-use uma_race_sim::api::{Frame, HorseFrame, RaceInput, SimOutput, span_kind};
+use uma_race_sim::api::{Frame, HorseFrame, RaceInput, SimOutput, event_kind, span_kind};
 use uma_race_sim::sim::{defs::last_spurt_calc_result, race as sim_race, record, tick};
 
 use super::{Race, SkillCheck, SkillOutcome, checks::skill_checks};
@@ -11,6 +11,35 @@ pub struct Activation {
     pub time: f32,
     /// Activating horse's distance at that time (interpolated from frames).
     pub distance: f32,
+    /// Horses it targeted: bit `g` = horse (gate) `g`.
+    pub targets: u32,
+}
+
+/// How a last spurt went.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpurtKind {
+    /// Max spurt speed from the final-leg start.
+    Full,
+    /// Max speed, but started after the final-leg start.
+    Delayed,
+    /// Started on time, but below max speed.
+    Reduced,
+    DelayedReduced,
+    /// Never switched to a last spurt.
+    NoSpurt,
+}
+
+impl SpurtKind {
+    /// Every kind, in the order `HorseStats::spurt_kinds` holds them.
+    pub const ALL: [SpurtKind; 5] = [SpurtKind::Full, SpurtKind::Delayed, SpurtKind::Reduced, SpurtKind::DelayedReduced, SpurtKind::NoSpurt];
+
+    pub fn delayed(self) -> bool {
+        matches!(self, SpurtKind::Delayed | SpurtKind::DelayedReduced)
+    }
+
+    pub fn reduced(self) -> bool {
+        matches!(self, SpurtKind::Reduced | SpurtKind::DelayedReduced)
+    }
 }
 
 /// Per horse summary of one run.
@@ -46,9 +75,8 @@ pub struct HorseRun {
     pub spurt_speed: f32,
     /// The calc's max spurt speed for this horse (m/s).
     pub max_spurt_speed: f32,
-    /// 0 full (max speed from the final-leg start), 1 delayed (max speed, started later), 2 reduced (on time, below
-    /// max speed), 3 delayed + reduced, 4 no spurt. `full_spurt` = kind 0.
-    pub spurt_kind: u8,
+    /// `full_spurt` = `SpurtKind::Full`.
+    pub spurt_kind: SpurtKind,
     /// Course distance where HP first hit 0 (None = never). See `hp_out_distance` for the accuracy.
     pub hp_out_at: Option<f32>,
     /// Each of its skills (input order): activated, or why not.
@@ -85,19 +113,24 @@ pub fn run_once(race: &Race, input: &RaceInput) -> Run {
     let goal = r.info.phase_distances.course_distance;
     let final_leg = r.info.phase_distances.phase_end_start_distance;
     // HP stops changing once a horse finishes, so the final HP is the HP at the goal.
-    let internals: Vec<(bool, f32, f32, f32, u8, f32)> = (0..r.horses.len())
+    let internals: Vec<(bool, f32, f32, f32, SpurtKind, f32)> = (0..r.horses.len())
         .map(|i| {
             let (max_v, need_hp) = max_spurt_speed(&mut r, i);
             let h = &r.horses[i];
             let ai = &h.ai;
             let kind = if ai.last_spurt_start_distance < 0.0 || ai.last_spurt_calc_result & last_spurt_calc_result::TRUE_FLAGS == 0 {
-                4
+                SpurtKind::NoSpurt
             } else {
                 // The calc starts a spurt on entering the final leg (within 2 steps < 3.5 m); TrueExceedNeedMaxHp sets
                 // exactly max speed, True picks a (start, speed) candidate that may be both later and slower.
                 let delayed = ai.last_spurt_start_distance > final_leg + SPURT_ON_TIME_M;
                 let reduced = ai.last_spurt_calc_result != last_spurt_calc_result::TRUE_EXCEED_NEED_MAX_HP && ai.last_spurt_target_speed < max_v * (1.0 - 1e-5);
-                delayed as u8 + 2 * reduced as u8
+                match (delayed, reduced) {
+                    (false, false) => SpurtKind::Full,
+                    (true, false) => SpurtKind::Delayed,
+                    (false, true) => SpurtKind::Reduced,
+                    (true, true) => SpurtKind::DelayedReduced,
+                }
             };
             (h.is_hp_empty_on_race, h.hp.max(0.0), ai.last_spurt_target_speed, max_v, kind, need_hp)
         })
@@ -125,10 +158,12 @@ pub fn run_once(race: &Race, input: &RaceInput) -> Run {
     let activations: Vec<Activation> = out
         .events
         .iter()
-        .filter(|e| e.kind == 3 && e.params.len() >= 2 && (e.params[0] as usize) < n)
+        // Skill event params: [horse, skill id, .., .., target flags].
+        .filter(|e| e.kind == event_kind::SKILL && e.params.len() >= 2 && (e.params[0] as usize) < n)
         .map(|e| {
             let horse = e.params[0] as usize;
-            Activation { horse, skill_id: e.params[1], time: e.time, distance: distance_at(frames, horse, e.time) }
+            let targets = e.params.get(4).map_or(0, |&t| t as u32);
+            Activation { horse, skill_id: e.params[1], time: e.time, distance: distance_at(frames, horse, e.time), targets }
         })
         .collect();
     for a in &activations {
@@ -150,7 +185,7 @@ pub fn run_once(race: &Race, input: &RaceInput) -> Run {
                 behind: res.finish_time_raw - winner_time,
                 spurt_start: res.last_spurt_start_distance,
                 spurt_delay: res.last_spurt_start_distance - final_leg,
-                full_spurt: spurt_kind == 0,
+                full_spurt: spurt_kind == SpurtKind::Full,
                 hp_at_goal,
                 hp_out,
                 place_by_progress: (0..=100).map(|p| 1 + (0..n).filter(|&j| j != h && ahead(j, h, p)).count() as u8).collect(),

@@ -21,24 +21,47 @@ pub enum SkillOutcome {
 }
 
 impl SkillOutcome {
-    /// Index into `OUTCOMES`.
-    pub fn kind(&self) -> usize {
+    pub fn kind(&self) -> OutcomeKind {
         match self {
-            Self::Activated => 0,
-            Self::WitCheck { .. } => 1,
-            Self::CantHere(_) => 2,
-            Self::Precondition | Self::NotMet { .. } => 3,
+            Self::Activated => OutcomeKind::Activated,
+            Self::WitCheck { .. } => OutcomeKind::WitCheck,
+            Self::CantHere(_) => OutcomeKind::CantHere,
+            Self::Precondition | Self::NotMet { .. } => OutcomeKind::NotMet,
         }
     }
 }
 
-/// (label, hint) per `SkillOutcome::kind`.
-pub const OUTCOMES: [(&str, &str); 4] = [
-    ("Activated", "Activated at least once"),
-    ("Wit check", "Failed the wit check"),
-    ("Can't here", "A fixed condition (style, distance, surface, track, ...) rules it out in this race"),
-    ("Conditions not met", "Passed the wit check, but its conditions never all held at once"),
-];
+/// `SkillOutcome` without the details, as the results group them. `kind as usize` indexes `SkillStat::outcomes`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutcomeKind {
+    Activated,
+    WitCheck,
+    CantHere,
+    /// Its precondition or conditions never held.
+    NotMet,
+}
+
+impl OutcomeKind {
+    pub const ALL: [OutcomeKind; 4] = [OutcomeKind::Activated, OutcomeKind::WitCheck, OutcomeKind::CantHere, OutcomeKind::NotMet];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            OutcomeKind::Activated => "Activated",
+            OutcomeKind::WitCheck => "Wit check",
+            OutcomeKind::CantHere => "Can't here",
+            OutcomeKind::NotMet => "Conditions not met",
+        }
+    }
+
+    pub fn hint(self) -> &'static str {
+        match self {
+            OutcomeKind::Activated => "Activated at least once",
+            OutcomeKind::WitCheck => "Failed the wit check",
+            OutcomeKind::CantHere => "A fixed condition (style, distance, surface, track, ...) rules it out in this race",
+            OutcomeKind::NotMet => "Passed the wit check, but its conditions never all held at once",
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SkillCheck {

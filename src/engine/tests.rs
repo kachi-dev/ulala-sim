@@ -228,12 +228,13 @@ fn wit_mechanics() {
     input.horses[0].wiz = 1200;
     // The same Wit as the old one: nothing changes.
     let w = wit(&race, &input, 0, 1200, &seeds(1, 4), &Work::default());
-    assert_eq!(w.rows.len(), WIT_MECHANICS.len() + 1);
-    assert!(w.rows.iter().all(|r| r.len() == 4) && w.rows.iter().flatten().all(|p| p.gain == 0.0 && p.new == p.old));
+    assert_eq!(w.rows.len(), WIT_MECHANICS.len());
+    assert!(w.rows.iter().chain([&w.all]).all(|r| r.len() == 4) && w.rows.iter().flatten().chain(&w.all).all(|p| p.gain == 0.0 && p.new == p.old));
     // 1200 vs 200: the section rolls move every race, and all at once costs the old Wit lengths on average.
     let w = wit(&race, &input, 0, 200, &seeds(1, 16), &Work::default());
-    assert!(w.rows[0].iter().all(|p| p.gain != 0.0));
-    assert!(w.rows[WIT_MECHANICS.len()].iter().map(|p| p.gain).sum::<f32>() > 0.0);
+    let sections = uma_race_sim::api::wiz_mechanic::SECTIONS.trailing_zeros() as usize;
+    assert!(w.rows[sections].iter().all(|p| p.gain != 0.0));
+    assert!(w.all.iter().map(|p| p.gain).sum::<f32>() > 0.0);
     // Every row starts from the same baseline race.
-    assert!(w.rows.iter().all(|r| r.iter().zip(&w.rows[0]).all(|(p, q)| p.old == q.old)));
+    assert!(w.rows.iter().chain([&w.all]).all(|r| r.iter().zip(&w.all).all(|(p, q)| p.old == q.old)));
 }
