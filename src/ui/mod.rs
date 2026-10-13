@@ -464,6 +464,15 @@ const SPLIT_JS: &str = r#"
     d.addEventListener('pointermove', move); d.addEventListener('pointerup', up);
   });
   document.addEventListener('dblclick', e => { if (e.target.closest && e.target.closest('.hdivider')) { try { localStorage.removeItem(TKEY); } catch {} applyT(null); } });
+  // Subtab switch: hold the pane's scroll bottom so a shorter tab can't pull the page up; the hold
+  // follows the view back up as you scroll and goes once the real content reaches it.
+  const bottom = p => p.scrollTop + p.clientHeight;
+  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('.dtabs button'), p = b && b.closest('.pane');
+    if (p) p.style.setProperty('--hold', bottom(p) - 1 + 'px'); }, true);
+  document.addEventListener('scroll', e => { const p = e.target; if (!p.classList || !p.classList.contains('pane') || !p.style.getPropertyValue('--hold')) return;
+    const last = p.lastElementChild, natural = last ? last.offsetTop + last.offsetHeight : 0;
+    if (bottom(p) <= natural) p.style.removeProperty('--hold');
+    else if (bottom(p) - 1 < parseFloat(p.style.getPropertyValue('--hold'))) p.style.setProperty('--hold', bottom(p) - 1 + 'px'); }, true);
 })();
 "#;
 

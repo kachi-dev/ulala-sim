@@ -109,7 +109,7 @@ pub fn CourseHist(
     });
     rsx! {
         svg { view_box: "0 0 {cw} {H}", style: SVG_STYLE, onresize: move |e| track(&mut size, e),
-            {course_axis(x, &phase_bounds(&phases, d), s0, T, T + ph, H, cw - R, &corners, &straights, &dist_ticks(s0, d, pw))}
+            {course_axis(x, &phase_bounds(&phases, d), s0, T, T + ph, H, cw - R, &corners, &straights, &dist_ticks(s0, d, pw), true)}
             if s0 > 0.0 {
                 text { x: cw - R, y: T - 8.0, fill: "var(--ink)", font_size: 11, font_weight: 700, text_anchor: "end", "Goal" }
                 line { x1: cw - R, x2: cw - R, y1: T - 4.0, y2: T + ph, stroke: "var(--ink)", stroke_width: 1.5 }
@@ -192,7 +192,7 @@ pub fn GainBars(
     let bars: Vec<(usize, f32, usize)> = (0..nb).filter(|&i| sums[i].0 > 0).map(|i| (i, mean(i), sums[i].0)).collect();
     rsx! {
         svg { view_box: "0 0 {cw} {h}", style: SVG_STYLE, onresize: move |e| track(&mut size, e),
-            {course_axis(x, &phase_bounds(&phases, d), 0.0, T, axis_y, h, cw - R, &corners, &straights, &dist_ticks(0.0, d, pw))}
+            {course_axis(x, &phase_bounds(&phases, d), 0.0, T, axis_y, h, cw - R, &corners, &straights, &dist_ticks(0.0, d, pw), true)}
             {y_grid(&ticks, y, L, cw - R, |t| format!("{} L", fmt_tick(t, step, false)))}
             line { x1: L, x2: cw - R, y1: y(0.0), y2: y(0.0), stroke: "var(--muted)", stroke_width: 1 }
             for &(i, m, n) in bars.iter() {
@@ -223,15 +223,15 @@ pub fn GainBars(
 }
 
 /// The course under a distance chart from `s0` m: late race / last spurt tinted from `top` down to the corner and
-/// straight bands at `axis_y`, phase lines, distance labels below them and phase names along the bottom (`h`).
+/// straight bands at `axis_y` (untinted unless `tint`), phase lines, distance labels below them and phase names along the bottom (`h`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn course_axis(
     x: impl Fn(f32) -> f32, bounds: &[f32], s0: f32, top: f32, axis_y: f32, h: f32, right: f32, corners: &[(f32, f32)],
-    straights: &[(f32, f32)], ticks: &[f32],
+    straights: &[(f32, f32)], ticks: &[f32], tint: bool,
 ) -> Element {
     rsx! {
         for (i, w) in bounds.windows(2).enumerate().filter(|(_, w)| w[1] > s0) {
-            rect { x: x(w[0]), y: top, width: (x(w[1]) - x(w[0])).max(0.0), height: axis_y - top, fill: if i >= 2 { "var(--accent)" } else { "transparent" }, fill_opacity: if i == 2 { 0.08 } else { 0.14 } }
+            rect { x: x(w[0]), y: top, width: (x(w[1]) - x(w[0])).max(0.0), height: axis_y - top, fill: if tint && i >= 2 { "var(--accent)" } else { "transparent" }, fill_opacity: if i == 2 { 0.08 } else { 0.14 } }
             if x(w[1]) - x(w[0]) > PHASES[i.min(3)].len() as f32 * 6.5 {
                 text { x: (x(w[0]) + x(w[1])) / 2.0, y: h - 6.0, fill: "var(--muted)", font_size: 10.5, text_anchor: "middle", "{PHASES[i.min(3)]}" }
             }

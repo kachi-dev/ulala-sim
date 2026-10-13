@@ -120,6 +120,9 @@ body.resizing-v { cursor: row-resize; user-select: none; }
 /* Panes share one cell; hidden ones stay laid out (visibility, not display) so they keep their scroll. */
 .right > .pane { grid-area: 4 / 1; padding: 14px 20px 40px; }
 .pane[hidden] { display: flex; visibility: hidden; }
+/* Subtab switch: holds the old scroll bottom (--hold, set in SPLIT_JS) so a shorter tab leaves blank space instead of jumping up. */
+.right > .pane { position: relative; }
+.pane::after { content: ""; position: absolute; top: var(--hold, 0); width: 1px; height: 1px; pointer-events: none; }
 .pane > *, .left > * { width: 100%; max-width: 1500px; margin-left: auto; margin-right: auto; flex: none; }
 .rtabs { display: flex; gap: 2px; padding: 8px 20px 0; border-bottom: 1px solid var(--line); }
 .rtab { font: inherit; font-size: 13.5px; font-weight: 800; border: 0; background: none; color: var(--muted); padding: 7px 14px 9px; cursor: pointer; position: relative; border-bottom: 2.5px solid transparent; margin-bottom: -1px; }
@@ -701,6 +704,7 @@ table.matrix td.never { color: var(--muted); background: repeating-linear-gradie
 /* Race conditions as one row of icon groups. */
 .condrow { display: flex; flex-wrap: wrap; gap: 4px; }
 .condgrp .small { text-align: center; margin-top: 2px; }
+.condgrp > span { text-align: center; }
 .seg.icons button { padding: 3px; line-height: 0; }
 .seg.icons .ico { width: 17px; height: 17px; stroke-width: 1.8; }
 /* An expanded skill on a field card spans the card. */

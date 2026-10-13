@@ -153,7 +153,7 @@ pub fn RaceChart(
                 }
             }
             svg { view_box: "0 0 {cw} {H}", style: SVG_STYLE, onresize: move |e| track(&mut size, e),
-                {course_axis(xm, &phase_bounds(&phases, d), 0.0, T, T + ph, H, cw - R, &corners, &straights, &dist_ticks(0.0, d, pw))}
+                {course_axis(xm, &phase_bounds(&phases, d), 0.0, T, T + ph, H, cw - R, &corners, &straights, &dist_ticks(0.0, d, pw), false)}
                 // Event stretches behind the curves: a tint over the plot and a solid strip along its bottom; the
                 // baseline's hatched in a dashed outline, like its dashed lines.
                 if ghost {

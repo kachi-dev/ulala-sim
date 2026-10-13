@@ -55,7 +55,8 @@ fn nearest<'a>(pool: impl Iterator<Item = &'a CourseInfo>, distance: i32) -> Opt
 fn seg(s: S, what: &str, cur: i32, opts: &[(i32, &'static str, &'static str)], set: fn(&mut RaceInput, i32)) -> Element {
     let picked = opts.iter().find(|o| o.0 == cur).map_or("", |o| o.1);
     rsx! {
-        div { class: "condgrp",
+        div { class: "field condgrp",
+            span { "{what}" }
             div { class: "seg icons",
                 for &(v, label, ico) in opts {
                     button { class: if v == cur { "on" }, title: "{what}: {label}", onclick: move |_| edit_race(s, |inp| set(inp, v)), {icon(ico)} }
@@ -211,11 +212,10 @@ pub(super) fn CourseCard() -> Element {
                 }
                 // A div: a label would forward caption clicks to the first button.
                 div { class: "field",
-                    span { "Ground · Weather · Season · Time of day" }
                     div { class: "condrow",
                         {seg(s, "Ground", ground, &[(1, "Firm", "firm"), (2, "Good", "good"), (3, "Soft", "soft"), (4, "Heavy", "heavy")], |i, v| i.ground_condition = v)}
                         {seg(s, "Weather", weather, &[(1, "Sunny", "sun"), (2, "Cloudy", "cloud"), (3, "Rainy", "rain"), (4, "Snowy", "snow")], |i, v| i.weather = v)}
-                        {seg(s, "Season", season, &[(1, "Spring", "spring"), (2, "Summer", "summer"), (3, "Fall", "fall"), (4, "Winter", "winter"), (5, "Sakura", "sakura")], |i, v| i.season = v)}
+                        {seg(s, "Season", season, &[(1, "Spring", "spring"), (2, "Summer", "summer"), (3, "Fall", "fall"), (4, "Winter", "snow"), (5, "Sakura", "sakura")], |i, v| i.season = v)}
                         {seg(s, "Time of day", time, &[(1, "Morning", "morning"), (2, "Day", "sun"), (3, "Evening", "evening"), (4, "Night", "night")], |i, v| i.time = v)}
                     }
                 }
