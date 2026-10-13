@@ -11,6 +11,7 @@ mod setup;
 mod skills;
 mod stamina;
 mod widgets;
+mod wit;
 
 use jobs::*;
 use saves::*;
@@ -121,6 +122,17 @@ struct StamRes {
     rev: u64,
 }
 
+#[derive(Clone, PartialEq)]
+struct WitRes {
+    /// Field index in the batch it was measured on.
+    horse: usize,
+    /// Wit on the baseline and as set up.
+    old: i32,
+    new: i32,
+    wit: Arc<Wit>,
+    rev: u64,
+}
+
 #[derive(Clone)]
 struct Job {
     label: String,
@@ -205,6 +217,10 @@ struct S {
     st_debuffs: Signal<bool>,
     /// (owner, skill) open in the debuffs table.
     st_dsel: Signal<Option<(usize, i32)>>,
+    // Wit subtab of the batch uma detail
+    w_res: Signal<Option<WitRes>>,
+    /// Mechanic row open in the table.
+    w_sel: Signal<Option<usize>>,
     g_n: Signal<usize>,
     g_res: Signal<Option<GainsRes>>,
     g_sort: Signal<(usize, bool)>,
@@ -281,6 +297,8 @@ pub fn App() -> Element {
         st_res: use_signal(|| None),
         st_debuffs: use_signal(|| false),
         st_dsel: use_signal(|| None),
+        w_res: use_signal(|| None),
+        w_sel: use_signal(|| None),
         g_n: use_signal(|| 200),
         g_res: use_signal(|| None),
         g_sort: use_signal(|| (1, true)),

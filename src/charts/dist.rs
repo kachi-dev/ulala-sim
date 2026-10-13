@@ -232,7 +232,7 @@ pub fn GainChart(rows: Vec<(String, String, [f32; 6], usize)>) -> Element {
                     rect { x: x(*p25), y: cy(i) - 6.0, width: (x(*p75) - x(*p25)).max(1.0), height: 12, rx: 2, fill: "{c}", fill_opacity: 0.35, stroke: "{c}", stroke_width: 1.5 }
                     line { x1: x(*p50), x2: x(*p50), y1: cy(i) - 8.0, y2: cy(i) + 8.0, stroke: "var(--ink)", stroke_width: 2 }
                     circle { cx: x(*mean), cy: cy(i), r: 3, fill: "var(--surface)", stroke: "var(--ink)", stroke_width: 1.5 }
-                    text { x: cw - 6.0, y: cy(i), fill: "var(--ink)", font_size: 11, font_weight: 600, text_anchor: "end", dominant_baseline: "central", "{mean:+.2}" }
+                    text { x: cw - 6.0, y: cy(i), fill: "var(--ink)", font_size: 11, font_weight: 600, text_anchor: "end", dominant_baseline: "central", "{mean:+.2} L" }
                 } else {
                     text { x: cw - 6.0, y: cy(i), fill: "var(--muted)", font_size: 11, text_anchor: "end", dominant_baseline: "central", "n/a" }
                 }

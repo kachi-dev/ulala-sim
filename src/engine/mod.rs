@@ -18,6 +18,7 @@ mod stamina;
 #[cfg(test)]
 mod tests;
 mod veterans;
+mod wit;
 
 pub use batch::*;
 pub use checks::*;
@@ -34,4 +35,5 @@ pub use saves::*;
 pub use skills::*;
 pub use stamina::*;
 pub use veterans::*;
+pub use wit::*;
 pub use uma_race_sim::api::{HorseInput, RaceInput, SkillInput};

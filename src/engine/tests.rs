@@ -219,3 +219,19 @@ fn stamina_debuffs() {
     // Per seed it's noisy (the runs diverge, and with them later RNG draws); on average it costs.
     assert!(st.loss.iter().map(|x| x.0).sum::<f32>() < -0.5 && st.full_at_max > st.stats.full_spurt_rate);
 }
+
+#[test]
+fn wit_mechanics() {
+    let race = new_race();
+    let mut input = race.input.clone();
+    input.horses = vec![new_horse(&race, 105201), new_horse(&race, cards()[0].card_id)];
+    input.horses[0].wiz = 1200;
+    // The same Wit as the old one: nothing changes.
+    let w = wit(&race, &input, 0, 1200, &seeds(1, 4), &Work::default());
+    assert_eq!((w.cur.len(), w.alt.len()), (4, WIT_MECHANICS.len() + 1));
+    assert!(w.alt.iter().flatten().zip(w.cur.iter().cycle()).all(|(a, c)| a.lengths == 0.0 && a.skills == c.skills));
+    // 1200 vs 200: the section rolls move every race, and all at once costs the old Wit lengths on average.
+    let w = wit(&race, &input, 0, 200, &seeds(1, 16), &Work::default());
+    assert!(w.alt[0].iter().all(|a| a.lengths != 0.0));
+    assert!(w.alt[WIT_MECHANICS.len()].iter().map(|a| a.lengths).sum::<f32>() > 0.0);
+}

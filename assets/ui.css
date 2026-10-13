@@ -408,6 +408,8 @@ table.gains td { padding-top: 3px; padding-bottom: 3px; }
 .ell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seg.small button { padding: 3px 9px; font-size: 12px; }
 .dtabs { margin: 2px 0 12px; }
+.dtabs-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 2px 0 12px; }
+.dtabs-row .dtabs { margin: 0; }
 .seg-label { margin-left: 6px; margin-right: -2px; font-size: 12px; font-weight: 700; color: var(--muted); }
 .race-h { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 6px; }
 .race-h .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
@@ -616,6 +618,8 @@ table.matrix td.never { color: var(--muted); background: repeating-linear-gradie
 .vs-h h4 { margin: 0 0 6px; }
 .vsbase .kpis > div { background: var(--surface); }
 .kpis b .d { font-size: 19px; }
+/* Label left, change right, under the value. */
+.kpi2 { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .skdetail { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
 .skdetail .kpis > div { background: var(--surface); }
 .margin { font-size: 11px; font-weight: 700; color: var(--accent-ink); }

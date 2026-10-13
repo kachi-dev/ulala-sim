@@ -31,7 +31,10 @@ pub(super) fn horse_detail(
 ) -> Element {
     let Some(race) = s.race.cloned() else { return rsx! {} };
     let (mut focus, mut skill_sel, mut detail_tab) = (s.focus, s.skill_sel, s.detail_tab);
-    let tab = *detail_tab.read();
+    // The Wit subtab only for an uma whose Wit differs from the baseline's.
+    let old_wiz = base.and_then(|_| crate::ui::wit::old_wit(s, &res.input, i));
+    let tabs = if old_wiz.is_some() { &["Summary", "Skills", "Stamina", "Wit"][..] } else { &["Summary", "Skills", "Stamina"][..] };
+    let tab = (*detail_tab.read()).min(tabs.len() - 1);
     let h = &cur.horses[i];
     let b = base.map(|b| &b.horses[i]);
     // Charts of one uma: the accent; her team / gate colour stays on her icon.
@@ -70,19 +73,24 @@ pub(super) fn horse_detail(
                 UmaLinks { i, card: res.input.horses[i].card_id }
                 button { class: "btn icon", title: "Close", onclick: move |_| focus.set(None), {icon("x")} }
             }
-            div { class: "seg small dtabs",
-                for (k, label) in ["Summary", "Skills", "Stamina"].into_iter().enumerate() {
-                    button {
-                        class: if tab == k { "on" },
-                        onclick: move |_| {
-                            detail_tab.set(k);
-                            // The open skill also marks the course map; it belongs to the Skills tab.
-                            if k != 1 {
-                                skill_sel.set(None);
-                            }
-                        },
-                        "{label}"
+            div { class: "dtabs-row",
+                div { class: "seg small dtabs",
+                    for (k, &label) in tabs.iter().enumerate() {
+                        button {
+                            class: if tab == k { "on" },
+                            onclick: move |_| {
+                                detail_tab.set(k);
+                                // The open skill also marks the course map; it belongs to the Skills tab.
+                                if k != 1 {
+                                    skill_sel.set(None);
+                                }
+                            },
+                            "{label}"
+                        }
                     }
+                }
+                if let (3, Some(old)) = (tab, old_wiz) {
+                    crate::ui::wit::WitRun { i, old }
                 }
             }
             if tab == 0 {
@@ -117,6 +125,9 @@ pub(super) fn horse_detail(
             }
             if tab == 2 {
                 {spurt_and_hp(h, cv, &color)}
+            }
+            if let (3, Some(old)) = (tab, old_wiz) {
+                crate::ui::wit::WitOut { i, old }
             }
             if tab == 1 {
                 div { class: "olegend muted small",
