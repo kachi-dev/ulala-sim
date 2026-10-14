@@ -341,7 +341,7 @@ pub(super) fn mode_seg(s: S, mut sel: Signal<Option<bool>>, field: usize) -> (El
                 button { class: if npc { "on" }, onclick: move |_| sel.set(Some(true)), "NPCs" }
                 button { class: if !npc { "on" }, disabled: field <= 1, onclick: move |_| sel.set(Some(false)), "This field" }
             }
-            if !npc {
+            if !npc && size > field {
                 small { class: "muted mode-note", "Empty slots will be filled in with NPCs" }
             }
         }
