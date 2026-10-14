@@ -27,7 +27,7 @@ fn improve_accuracy(s: S, id: i32) {
     input.random_seed = random_seed();
     let work = ACCURACY_N * 2 * input.horses.len();
     let label = format!("Measuring {} × {} seeds", skill_info(id).name, thousands(ACCURACY_N));
-    let run = move |w: &Work| skill_gains(&race, &input, i, &[id], ACCURACY_N, w).0;
+    let run = move |w: &Work| skill_gains(&race, &input, i, &[id], r.blank, ACCURACY_N, w).0;
     measure(s, label, ACCURACY_N, work, run, move |mut s, mut fresh| {
         // Cancelled (no full sample set), or a new measurement replaced this one meanwhile: keep what's there.
         let Some(g) = fresh.pop() else { return };
@@ -63,7 +63,7 @@ pub(super) fn gain_charts(samples: &[f32], by_distance: &[(f32, f32)], color: &s
 #[component]
 pub fn GainsTab() -> Element {
     let s = use_context::<S>();
-    let mut g_owned = s.g_owned;
+    let (mut g_owned, mut g_blank) = (s.g_owned, s.g_blank);
     let running = use_busy(s);
     let input = s.input.read();
     if input.horses.is_empty() {
@@ -78,11 +78,22 @@ pub fn GainsTab() -> Element {
     let cv = s.cview.cloned();
     let poor = poor_apts(&horse, cv.as_deref());
     let (owned, n) = (*g_owned.read(), *s.g_n.read());
+    let blank = owned && *g_blank.read();
     let f = s.g_filter.cloned();
+    // New skills: ones she doesn't have that can activate here (right course, conditions and style for her).
+    let mut never = 0;
+    let has = |id: i32| horse.skills.iter().any(|k| k.skill_id == id);
     let cands: Vec<i32> = if owned {
         horse.skills.iter().map(|k| k.skill_id).collect()
     } else {
-        s.skills.read().iter().filter(|k| skills::learnable(k, horse.card_id) && skills::matches(&f, k)).map(|k| k.id).collect()
+        let ids: Vec<i32> = s.skills.read().iter().filter(|k| !has(k.id) && skills::learnable(k, horse.card_id) && skills::matches(&f, k)).map(|k| k.id).collect();
+        let n = ids.len();
+        let ok = match s.race.cloned() {
+            Some(race) => can_activate(&race, &s.input.read(), hi, ids),
+            None => ids,
+        };
+        never = n - ok.len();
+        ok
     };
     let (mode, npc, size) = mode_seg(s, s.g_npc, field_n);
     let n_c = cands.len();
@@ -99,11 +110,11 @@ pub fn GainsTab() -> Element {
         let (cands, rev, field) = (cands.clone(), *s.rev.peek(), input.horses.clone());
         let (card, chara, asked) = (horse.card_id, horse.chara_id, cands.len());
         let label = format!("Measuring {} skills × {n} seeds", thousands(asked));
-        let run = move |w: &Work| skill_gains(&race, &input, i, &cands, n, w);
+        let run = move |w: &Work| skill_gains(&race, &input, i, &cands, blank, n, w);
         measure(s, label, asked * n, work, run, move |mut s, (items, spurt)| {
             s.g_sel.set(None);
             let low_spurt = low_spurts(&field, &spurt);
-            s.g_res.set(Some(GainsRes { horse: hi, card, chara, items: Arc::new(items), cv, n, asked, npc, lobby, size, low_spurt, rev }));
+            s.g_res.set(Some(GainsRes { horse: hi, card, chara, items: Arc::new(items), cv, n, asked, npc, blank, lobby, size, low_spurt, rev }));
             reveal("gains");
         });
     };
@@ -134,8 +145,26 @@ pub fn GainsTab() -> Element {
                     }
                 }
             }
-            if !owned {
-                skills::SkillFilters { filter: s.g_filter }
+            if owned {
+                div { class: "card-h cands",
+                    span { class: "sf-label", "Baseline" }
+                    div { class: "seg",
+                        button { class: if blank { "on" }, onclick: move |_| g_blank.set(true), "Blank" }
+                        button { class: if !blank { "on" }, onclick: move |_| g_blank.set(false), "All skills" }
+                    }
+                    Help {
+                        p {
+                            b { "Blank" }
+                            " - Comparison baseline is set to a sim with 0 skills: gives skills' raw length contribution. Think of this as how much a skill is worth on its own."
+                        }
+                        p {
+                            b { "All skills" }
+                            " - Comparison baseline includes all skills: gives skills' length contribution within current skillset. Think of this as how much a skill is currently contributing. For example, despite accel skills being highly valued, if you already have 3 this sim will highlight how much that 3rd accel is actually needed."
+                        }
+                    }
+                }
+            } else {
+                skills::SkillFilters { filter: s.g_filter, fixed_course: true }
             }
             if let Some(p) = &poor {
                 div { class: "warn",
@@ -144,7 +173,11 @@ pub fn GainsTab() -> Element {
             }
             div { class: "runbar",
                 button { class: "btn big", disabled: running() || n_c == 0, onclick: start, "Measure {thousands(n_c)} skills" }
-                span { class: "muted", "{thousands(n_c)} skills match · {thousands(races)} races, {eta}" }
+                span { class: "muted",
+                    "{thousands(n_c)} skills match"
+                    if never > 0 { " ({thousands(never)} more can't activate on this course or style)" }
+                    " · {thousands(races)} races, {eta}"
+                }
                 Progress {}
             }
         }
@@ -177,11 +210,17 @@ fn GainsResults() -> Element {
     if col == GainCol::Skill {
         rows.sort_by(|a, b| a.0.name.cmp(&b.0.name));
     } else {
-        rows.sort_by(|a, b| key(a.1).total_cmp(&key(b.1)));
+        rows.sort_by(|a, b| key(a.1).total_cmp(&key(b.1)).then(a.1.lengths.mean.total_cmp(&b.1.lengths.mean)));
     }
     if desc {
         rows.reverse();
     }
+    // Green/red only in the sorted column.
+    let tone = |c: GainCol, v: f32, base: &'static str| match (c == col, v) {
+        (true, v) if v > 0.005 => "num good",
+        (true, v) if v < -0.005 => "num bad",
+        _ => base,
+    };
     // The chart always ranks by mean (its right column), whatever the table's sort.
     let chart: Vec<(String, String, [f32; 6], usize)> = r
         .items
@@ -191,6 +230,11 @@ fn GainsResults() -> Element {
             let k = skill_info(g.skill_id);
             let color = rarity_color(&k).to_string();
             let name = if k.inherited { format!("{} (inherited)", k.name) } else { k.name };
+            let name = match (g.replaces, g.upgrade) {
+                (Some(_), true) => format!("{name} (upgrade)"),
+                (Some(_), false) => format!("{name} (downgrade)"),
+                (None, _) => name,
+            };
             let l = &g.lengths;
             (name, color, [l.p10, l.p25, l.p50, l.p75, l.p90, l.mean], g.samples.len())
         })
@@ -199,7 +243,7 @@ fn GainsResults() -> Element {
     // The open skill's details, in a row under it.
     let detail = selected.map(|g| {
         let k = skill_info(g.skill_id);
-        let (horse, new) = (r.horse, learned(&k));
+        let (horse, new, old) = (r.horse, learned(&k), g.replaces);
         let id = g.skill_id;
         rsx! {
             div { class: "gdetail", id: "gdetail",
@@ -209,7 +253,18 @@ fn GainsResults() -> Element {
                     div { b { "{g.lengths.min:+.2} to {g.lengths.max:+.2}" } span { "min to max" } }
                     div { b { "{pct(g.rate)}" } span { "activates" } }
                     if can_add() {
-                        button { class: "btn alt", onclick: move |_| add_skill(s, horse, new), "Add to {chara_name(r.chara)}" }
+                        if let Some(old) = old {
+                            button {
+                                class: "btn alt",
+                                onclick: move |_| edit(s, horse, |h| {
+                                    h.skills.retain(|x| x.skill_id != old);
+                                    h.skills.push(new);
+                                }),
+                                "Swap in for {skill_info(old).name}"
+                            }
+                        } else {
+                            button { class: "btn alt", onclick: move |_| add_skill(s, horse, new), "Add to {chara_name(r.chara)}" }
+                        }
                     }
                     if g.samples.len() < ACCURACY_N {
                         button {
@@ -237,6 +292,7 @@ fn GainsResults() -> Element {
                 {uma_icon(r.card, r.chara, None, "md")}
                 h3 { "{chara_name(r.chara)}: {thousands(r.items.len())} skills × {r.n} seeds" }
                 span { class: "chip", if r.npc { "NPCs" } else { "This field" } }
+                if r.blank { span { class: "chip", "vs no skills" } }
                 span { class: "muted", "lengths gained (1 length = 2.5 m)" }
             }
             {spurt_warn(&r.low_spurt)}
@@ -277,11 +333,18 @@ fn GainsResults() -> Element {
                                             sel.set(if open { None } else { Some(id) });
                                         }
                                     },
-                                    td { {skill_row(&k, None, "")} }
-                                    td { class: if g.lengths.mean > 0.005 { "num good" } else { "num" }, b { "{g.lengths.mean:+.2}" } }
-                                    td { class: "num", "{g.lengths.p50:+.2}" }
-                                    td { class: "num muted", "{g.lengths.min:+.2}" }
-                                    td { class: "num muted", "{g.lengths.max:+.2}" }
+                                    td {
+                                        {skill_row(&k, None, "")}
+                                        if let Some(old) = g.replaces {
+                                            div { class: "muted small", title: "Measured against {skill_info(old).name}, which she has",
+                                                if g.upgrade { "Upgrade" } else { "Downgrade" }
+                                            }
+                                        }
+                                    }
+                                    td { class: tone(GainCol::Mean, g.lengths.mean, "num"), b { "{g.lengths.mean:+.2}" } }
+                                    td { class: tone(GainCol::Median, g.lengths.p50, "num"), "{g.lengths.p50:+.2}" }
+                                    td { class: tone(GainCol::Min, g.lengths.min, "num muted"), "{g.lengths.min:+.2}" }
+                                    td { class: tone(GainCol::Max, g.lengths.max, "num muted"), "{g.lengths.max:+.2}" }
                                     td { class: "num", "{pct(g.rate)}" }
                                 }
                                 if sel.read().as_ref() == Some(&g.skill_id) {

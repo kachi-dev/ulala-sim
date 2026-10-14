@@ -100,16 +100,21 @@ pub struct Run {
 
 /// Simulates `input` once (its own `random_seed`).
 pub fn run_once(race: &Race, input: &RaceInput) -> Run {
-    let custom;
-    let input = if race.replay.is_none() && input.horses.len() > 1 {
-        custom = custom_popularity(input);
-        &custom
-    } else {
-        input
-    };
+    let input = sim_input(race, input);
     // = sim::simulate, keeping the spurt / HP internals before the race is consumed.
-    let mut r = sim_race::init(input, &race.data);
+    let mut r = sim_race::init(&input, &race.data);
     tick::run(&mut r);
+    finish_run(r)
+}
+
+/// `input` as `run_once` simulates it: custom races get popularity from the field.
+pub(super) fn sim_input<'a>(race: &Race, input: &'a RaceInput) -> std::borrow::Cow<'a, RaceInput> {
+    if race.replay.is_none() && input.horses.len() > 1 { std::borrow::Cow::Owned(custom_popularity(input)) } else { std::borrow::Cow::Borrowed(input) }
+}
+
+/// The `Run` of a finished sim race (after `tick::run`, or `tick::finish`).
+pub(super) fn finish_run(mut r: sim_race::Race) -> Run {
+    let seed = r.input.random_seed;
     let goal = r.info.phase_distances.course_distance;
     let final_leg = r.info.phase_distances.phase_end_start_distance;
     // HP stops changing once a horse finishes, so the final HP is the HP at the goal.
@@ -206,7 +211,7 @@ pub fn run_once(race: &Race, input: &RaceInput) -> Run {
             }
         })
         .collect();
-    Run { seed: input.random_seed, goal, out, horses, activations }
+    Run { seed, goal, out, horses, activations }
 }
 
 /// A spurt starting within this many metres after the final-leg start is on time (the calc runs on entering the final

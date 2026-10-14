@@ -1,6 +1,7 @@
-use uma_race_sim::api::{HorseInput, RaceInput, SkillInput};
+use uma_race_sim::api::{HorseInput, RaceInput, SkillInput, event_kind};
+use uma_race_sim::sim::{race as sim_race, tick};
 
-use super::{Dist, GRADE_A, MAX_STAMINA, Race, STYLES, Work, ability_type, cards, course_info, custom_popularity, default_level, dist, distance_type, gap_lengths, names, new_horse, par_map, run_once, seeds, set_card};
+use super::{Dist, GRADE_A, MAX_STAMINA, Race, STYLES, Work, ability_type, cards, course_info, custom_popularity, default_level, dist, distance_type, finish_run, gap_lengths, names, new_horse, par_map, run_once, seeds, set_card, sim_input};
 
 /// Default NPC field size (a Champions Meeting field): the measured uma and 8 NPCs.
 pub const FIELD_MIN: usize = 9;
@@ -90,15 +91,39 @@ pub struct SkillGain {
     pub distances: Vec<f32>,
     /// (first activation distance, gain) of each seed it activated on.
     pub by_distance: Vec<(f32, f32)>,
+    /// The owned skill of the same group (white ↔ gold, ○ ↔ ◎) it was measured in place of.
+    pub replaces: Option<i32>,
+    /// With `replaces`: the candidate is the better version (higher rarity, then group rate: ◎ over ○ over ×).
+    pub upgrade: bool,
 }
 
 /// For each candidate: `horse` with the skill (added if not owned) vs the skill muted, paired on `n` seeds, in
-/// `input`'s field (see `npc_field`). Sorted by mean gain, best first. Candidates without all `n` samples (cancelled)
+/// `input`'s field (see `npc_field`). `blank`: the horse's other skills removed in both runs (the skill alone vs no
+/// skills). A candidate the horse doesn't own but owns another version of (same `group_id`) is measured in place of
+/// it: the gain is the new version's over the old one's. Sorted by mean gain, best first. Candidates without all `n` samples (cancelled)
 /// are dropped. Also each horse's full-spurt rate over all runs.
-pub fn skill_gains(race: &Race, input: &RaceInput, horse: usize, candidates: &[i32], n: usize, w: &Work) -> (Vec<SkillGain>, Vec<f32>) {
+pub fn skill_gains(race: &Race, input: &RaceInput, horse: usize, candidates: &[i32], blank: bool, n: usize, w: &Work) -> (Vec<SkillGain>, Vec<f32>) {
     let seeds = seeds(input.random_seed, n);
-    let (v, spurt) = measure(candidates.len(), n, w, |k, s| paired_gain(race, input, horse, seeds[s], candidates[k], |_| {}));
-    let v = v.into_iter().map(|(k, g)| SkillGain { skill_id: candidates[k], lengths: g.lengths, samples: g.samples, rate: g.rate, distances: g.distances, by_distance: g.by_distance });
+    let owned = &input.horses[horse].skills;
+    let group = |id: i32| race.data.skills.get(&id).map_or(0, |s| s.group_id);
+    let rank = |id: i32| race.data.skills.get(&id).map(|s| (s.rarity, s.group_rate));
+    let replaces: Vec<Option<i32>> = candidates
+        .iter()
+        .map(|&id| {
+            let g = group(id);
+            let other = owned.iter().find(|s| g != 0 && s.skill_id != id && group(s.skill_id) == g);
+            other.filter(|_| !owned.iter().any(|s| s.skill_id == id)).map(|s| s.skill_id)
+        })
+        .collect();
+    let (v, spurt) = measure(candidates.len(), n, w, |k, s| {
+        let id = candidates[k];
+        paired_gain(race, input, horse, seeds[s], id, replaces[k], |h| {
+            if blank {
+                h.skills.retain(|x| x.skill_id == id);
+            }
+        })
+    });
+    let v = v.into_iter().map(|(k, g)| SkillGain { skill_id: candidates[k], lengths: g.lengths, samples: g.samples, rate: g.rate, distances: g.distances, by_distance: g.by_distance, replaces: replaces[k], upgrade: replaces[k].is_some_and(|old| rank(candidates[k]) > rank(old)) });
     (v.collect(), spurt)
 }
 
@@ -147,8 +172,13 @@ fn measure(items: usize, n: usize, w: &Work, paired: impl Fn(usize, usize) -> Pa
 /// Gain in lengths of skill `id` for horse `i` (after `setup`) on one seed: skill on vs muted in `input`'s field, plus
 /// the skill's activation distances and each horse's full spurts over the two runs. Gain = the horse's
 /// distance gap at the moment the faster of the two runs crosses the goal (knock-on effects on the others are real
-/// and part of it). A skill the horse doesn't own is added at `default_level`.
-fn paired_gain(race: &Race, input: &RaceInput, i: usize, seed: i32, id: i32, setup: impl Fn(&mut HorseInput)) -> Pair {
+/// and part of it). A skill the horse doesn't own is added at `default_level`. `swap`: an owned skill muted in the
+/// skill-on run instead, so both runs keep both skills' activations and the gain is `id`'s effect over `swap`'s.
+///
+/// The two runs are identical until `id` or `swap` first activates (only their effects differ), so the muted run keeps
+/// a snapshot every `FORK_EVERY` steps and the skill-on run continues from the last one before that activation; no
+/// activation = no skill-on run (gain 0). Bit-identical to two full runs (`gains_fingerprint`).
+fn paired_gain(race: &Race, input: &RaceInput, i: usize, seed: i32, id: i32, swap: Option<i32>, setup: impl Fn(&mut HorseInput)) -> Pair {
     let run = |muted: bool| {
         let mut inp = RaceInput { random_seed: seed, ..input.clone() };
         let h = &mut inp.horses[i];
@@ -163,14 +193,62 @@ fn paired_gain(race: &Race, input: &RaceInput, i: usize, seed: i32, id: i32, set
         } else if muted {
             // Activates with identical RNG draws and events, but applies no effect: a clean pair.
             h.muted_skills.push(id);
+        } else if let Some(old) = swap {
+            h.muted_skills.push(old);
         }
-        run_once(race, &inp)
+        inp
     };
-    let (a, b) = (run(false), run(true));
+    let (a, b) = if sets_style(race, id) {
+        // Runaway: the muted run drops the skill, so the runs differ from the start.
+        (run_once(race, &run(false)), run_once(race, &run(true)))
+    } else {
+        let (on, muted) = (run(false), run(true));
+        let (on, muted) = (sim_input(race, &on), sim_input(race, &muted));
+        let mut r = sim_race::init(&muted, &race.data);
+        // (state, started): the last state before `id` / `swap` first activated, from before `tick::start` (passive
+        // skills activate in its first frame) and then every `FORK_EVERY` steps.
+        let mut snap = Some((r.clone(), false));
+        tick::start(&mut r);
+        let (mut fork, mut seen, mut steps, mut end) = (None, 0, 0, false);
+        loop {
+            if fork.is_none() {
+                // Skill event params: [horse, skill id, ..].
+                let fired = r.recorder.events[seen..].iter().any(|e| e.kind == event_kind::SKILL && e.params.len() >= 2 && e.params[0] as usize == i && (e.params[1] == id || Some(e.params[1]) == swap));
+                seen = r.recorder.events.len();
+                if fired {
+                    fork = snap.take();
+                } else if !end && steps % FORK_EVERY == 0 {
+                    snap = Some((r.clone(), true));
+                }
+            }
+            if end {
+                break;
+            }
+            end = tick::step(&mut r);
+            steps += 1;
+        }
+        tick::finish(&mut r);
+        let b = finish_run(r);
+        let Some((mut a, started)) = fork else {
+            // Neither activated: the skill-on run would be identical (gain 0).
+            return Pair { gain: 0.0, distances: Vec::new(), full_spurts: b.horses.iter().map(|x| 2 * x.full_spurt as u8).collect() };
+        };
+        a.input = &on;
+        if !started {
+            tick::start(&mut a);
+        }
+        while !tick::step(&mut a) {}
+        tick::finish(&mut a);
+        (finish_run(a), b)
+    };
     let gain = gap_lengths(&a.out.frames, &b.out.frames, i, a.goal);
     let full_spurts = a.horses.iter().zip(&b.horses).map(|(x, y)| x.full_spurt as u8 + y.full_spurt as u8).collect();
     Pair { gain, distances: a.activations.iter().filter(|x| x.horse == i && x.skill_id == id).map(|x| x.distance).collect(), full_spurts }
 }
+
+/// `paired_gain`'s snapshot interval in sim steps (1/15 s): the skill-on run redoes at most this many. A clone costs
+/// ~6 steps (mostly the horses' skill state), so sparse wins: measured fastest around 300 (20 s of race).
+const FORK_EVERY: usize = 300;
 
 /// The skill has a Runaway ability: its effect is the running style, set at the start.
 fn sets_style(race: &Race, id: i32) -> bool {
@@ -212,7 +290,7 @@ pub fn uma_ranking(race: &Race, input: &RaceInput, horse: usize, cards: &[i32], 
         .collect();
     let (v, spurt) = measure(items.len(), n, w, |k, s| {
         let (card, style, unique) = items[k];
-        paired_gain(race, input, horse, seeds[s], unique, |h| {
+        paired_gain(race, input, horse, seeds[s], unique, None, |h| {
             set_card(h, card);
             h.running_style = style;
             h.proper_running_style[(style - 1).clamp(0, 3) as usize] = 7;

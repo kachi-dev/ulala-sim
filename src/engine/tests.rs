@@ -53,14 +53,33 @@ fn custom_race() {
 
     let w = Work::default();
     let cands = [200331, 100521, 201352]; // Professor of Curvature, Urara's unique (owned), Hydrate
-    let g = skill_gains(&race, &new_race().input, 0, &cands, 8, &w).0;
+    let g = skill_gains(&race, &new_race().input, 0, &cands, false, 8, &w).0;
     assert_eq!(w.done.load(Relaxed), 24);
     // Muted baseline: a skill that never activates changes nothing.
     assert!(g.iter().filter(|x| x.rate == 0.0).all(|x| x.samples.iter().all(|&v| v == 0.0)));
     assert!(g.len() == 3 && g.iter().all(|x| x.samples.len() == 8 && (0.0..=1.0).contains(&x.rate)));
-    assert!(g.windows(2).all(|w| w[0].lengths.mean >= w[1].lengths.mean));
+    assert!(g.windows(2).all(|w| w[0].lengths.mean >= w[1].lengths.mean) && g.iter().all(|x| x.replaces.is_none()));
+    // Same-group versions (○ ↔ ◎, white ↔ gold) are measured in place of the owned one, both ways; other groups
+    // (Right-Handed Demon) and owned skills aren't.
+    let swaps = |owned: &[i32], cands: &[i32]| {
+        let mut inp = new_race().input;
+        inp.horses[0].skills = owned.iter().map(|&skill_id| SkillInput { skill_id, level: 1 }).collect();
+        let g = skill_gains(&race, &inp, 0, cands, false, 2, &w).0;
+        let get = |id| g.iter().find(|x| x.skill_id == id).unwrap();
+        cands.iter().map(|&id| get(id).replaces.map(|old| (old, get(id).upgrade))).collect::<Vec<_>>()
+    };
+    // Left-Handed ○, Sprint Corners ○, Corner Adept ○ owned
+    let owned = [200022, 200972, 200332];
+    // Left-Handed ◎, Sprint Corners ◎, Professor of Curvature, Right-Handed Demon, Corner Adept ○ (owned)
+    let up = swaps(&owned, &[200021, 200971, 200331, 200014, 200332]);
+    assert_eq!(up, [Some((200022, true)), Some((200972, true)), Some((200332, true)), None, None]);
+    // Left-Handed ◎, Sprint Corners ◎, Professor of Curvature owned; their ○ versions are downgrades.
+    let down = swaps(&[200021, 200971, 200331], &owned);
+    assert_eq!(down, [Some((200021, false)), Some((200971, false)), Some((200331, false))]);
+    // Left-Handed × owned: ○ is the upgrade.
+    assert_eq!(swaps(&[200023], &[200022]), [Some((200023, true))]);
     w.cancel.store(true, Relaxed);
-    assert!(skill_gains(&race, &race.input, 0, &cands, 8, &w).0.is_empty());
+    assert!(skill_gains(&race, &race.input, 0, &cands, false, 8, &w).0.is_empty());
 
     // NPC lobby: the measured uma at gate 5 among 8 NPCs of distinct charas; the front-heavy end has 3 Runaways.
     let (f, i) = npc_field(&race, &new_race().input, 0, true, LOBBIES.len() - 1, FIELD_MIN);
@@ -248,4 +267,33 @@ fn wit_mechanics() {
     assert!(w.all.iter().map(|p| p.gain).sum::<f32>() > 0.0);
     // Every row starts from the same baseline race.
     assert!(w.rows.iter().chain([&w.all]).all(|r| r.iter().zip(&w.all).all(|(p, q)| p.old == q.old)));
+}
+
+/// Fingerprint of `skill_gains` (every non-unique candidate that can activate, 16 seeds, NPC field, two courses, with
+/// owned ○ skills so swaps are covered): one line per skill, samples as f32 bits. Written to `$GAINS_FP`; diff two
+/// files to check a speed-up changed nothing.
+#[test]
+#[ignore]
+fn gains_fingerprint() {
+    let race = new_race();
+    let mut out = String::new();
+    for course in [race.input.course_set_id, cs_long(&race)] {
+        let mut input = race.input.clone();
+        set_course(&race, &mut input, course);
+        // Corner Adept ○, Left-Handed ○, Right-Handed ○
+        input.horses[0].skills.extend([200332, 200022, 200012].map(|skill_id| SkillInput { skill_id, level: 1 }));
+        let (input, i) = npc_field(&race, &input, 0, true, 2, FIELD_MIN);
+        let ids: Vec<i32> = all_skills(&race).iter().filter(|k| !k.is_unique()).map(|k| k.id).collect();
+        let cands = can_activate(&race, &input, i, ids);
+        let w = Work::default();
+        let t = std::time::Instant::now();
+        let mut g = skill_gains(&race, &input, i, &cands, false, 16, &w).0;
+        println!("course {course}: {} skills in {:.1?}", g.len(), t.elapsed());
+        g.sort_by_key(|x| x.skill_id);
+        for x in g {
+            let bits: Vec<String> = x.samples.iter().map(|v| format!("{:08x}", v.to_bits())).collect();
+            out += &format!("{course} {} {:?} {} {}\n", x.skill_id, x.replaces, x.rate, bits.join(" "));
+        }
+    }
+    std::fs::write(std::env::var("GAINS_FP").expect("GAINS_FP"), out).unwrap();
 }

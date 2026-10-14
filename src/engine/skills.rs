@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use uma_race_sim::api::RaceInput;
 use uma_race_sim::data::{DataEra, GameData, SkillData};
+use uma_race_sim::sim::{race as sim_race, skill::never_activates};
 
 use super::{DISTANCES, PHASES, Race, STYLES, SURFACES, SkillInput, game_data, names, pick};
 
@@ -154,6 +156,13 @@ fn skill_table(data: &GameData) -> Arc<SkillTable> {
             Arc::new(SkillTable { all: Arc::new(v), by_id })
         })
         .clone()
+}
+
+/// `ids` minus the skills that can never activate for `input.horses[horse]` in this race: wrong course, ground,
+/// weather, season or running style for every one of its conditions (the sim's `skill::never_activates`).
+pub fn can_activate(race: &Race, input: &RaceInput, horse: usize, ids: impl IntoIterator<Item = i32>) -> Vec<i32> {
+    let mut r = sim_race::init(input, &race.data);
+    ids.into_iter().filter(|&id| !never_activates(&mut r, horse, id)).collect()
 }
 
 /// `SkillInfo` from names.json plus the skill's data: effects from ability types / targets (the sim's

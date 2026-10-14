@@ -320,6 +320,8 @@ td.skills > .skr + .skr { margin-top: 3px; }
   background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow);
   color: var(--ink); font-size: 12px; font-weight: 500; text-transform: none; letter-spacing: normal; line-height: 1.4;
 }
+.help-pop p { margin: 0; }
+.help-pop p + p { margin-top: 8px; }
 .two { display: grid; grid-template-columns: 0.8fr 1fr 1fr; gap: 10px; margin-top: 12px; }
 .apt-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .apt { display: grid; gap: 2px; font-size: 11.5px; font-weight: 700; color: var(--muted); }
@@ -362,6 +364,7 @@ table.grid { border-collapse: collapse; width: 100%; }
 .grid .num { text-align: right; white-space: nowrap; }
 .grid td.ok, .grid td .ok, .grid td.good { color: var(--good); font-weight: 800; }
 .grid td.no, .grid td .no { color: var(--bad); }
+.grid td.bad { color: var(--bad); font-weight: 800; }
 .who { white-space: nowrap; }
 .who b { margin-left: 8px; }
 .gate { margin-left: 6px; font-size: 11.5px; color: var(--muted); font-weight: 700; }

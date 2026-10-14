@@ -105,6 +105,8 @@ struct GainsRes {
     /// Candidates asked for (fewer come back when cancelled).
     asked: usize,
     npc: bool,
+    /// Measured against no skills instead of her full skillset (Current Skills' "Blank" baseline).
+    blank: bool,
     /// NPC lobby and field size measured in (for "Improve fidelity", which re-measures one skill in the same field).
     lobby: usize,
     size: usize,
@@ -209,6 +211,7 @@ struct S {
     // Skill Gains tab
     g_filter: Signal<skills::SkillFilter>,
     g_owned: Signal<bool>,
+    g_blank: Signal<bool>,
     /// Some(true) = NPC field, Some(false) = this field, None = automatic (NPCs for a one-uma field).
     g_npc: Signal<Option<bool>>,
     /// NPC lobby (index into `LOBBIES`), shared by Skill gains and Uma ranking.
@@ -307,6 +310,7 @@ pub fn App() -> Element {
         n: use_signal(|| 1000),
         g_filter: use_signal(|| skills::SkillFilter { kinds: vec![Rarity::Gold], ..Default::default() }),
         g_owned: use_signal(|| false),
+        g_blank: use_signal(|| false),
         g_npc: use_signal(|| None),
         npc_lobby: use_signal(|| 2),
         field_size: use_signal(|| FIELD_MIN),

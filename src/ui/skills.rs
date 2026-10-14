@@ -25,9 +25,15 @@ fn group_of(tag: &str) -> Option<&'static str> {
     GROUPS.iter().find(|g| g.1.contains(&tag)).map(|g| g.0)
 }
 
-/// Learnable by an uma wearing `card`: everything except other characters' (non-inherited) uniques.
+/// Learnable by an uma wearing `card`: no uniques but its own (ones with no owner card, like 1-2★ versions, are
+/// nobody's), no inherited version of its own chara's unique (a parent can't be the same chara).
 pub(super) fn learnable(k: &SkillInfo, card: i32) -> bool {
-    !k.is_unique() || k.owner_card.is_none_or(|c| c == card)
+    let chara = |c: i32| card_info(c).map(|x| x.chara_id);
+    match k.owner_card {
+        _ if k.is_unique() => k.owner_card == Some(card),
+        Some(c) if k.inherited => chara(c) != chara(card),
+        _ => true,
+    }
 }
 
 pub(super) fn matches(f: &SkillFilter, k: &SkillInfo) -> bool {
@@ -56,11 +62,13 @@ pub(super) fn toggle<T: PartialEq>(v: &mut Vec<T>, x: T) {
     }
 }
 
-/// Search box + chip rows (`SKILL_EFFECTS`, rarity, `SKILL_TAGS` by group).
+/// Search box + chip rows (`SKILL_EFFECTS`, rarity, `SKILL_TAGS` by group). `fixed_course`: no Style, Distance or
+/// Surface rows (the candidates are already the ones that can activate on the course, for the uma's style).
 #[component]
-pub fn SkillFilters(mut filter: Signal<SkillFilter>) -> Element {
+pub fn SkillFilters(mut filter: Signal<SkillFilter>, #[props(default)] fixed_course: bool) -> Element {
     let f = filter.cloned();
-    let mut rows: Vec<(&str, Vec<&'static str>)> = GROUPS.iter().map(|g| (g.0, g.1.to_vec())).collect();
+    let fixed = |g: &str| fixed_course && ["Style", "Distance", "Surface"].contains(&g);
+    let mut rows: Vec<(&str, Vec<&'static str>)> = GROUPS.iter().filter(|g| !fixed(g.0)).map(|g| (g.0, g.1.to_vec())).collect();
     rows.push(("Other", SKILL_TAGS.iter().copied().filter(|t| group_of(t).is_none()).collect()));
     rows.retain(|r| !r.1.is_empty());
     let any = f != SkillFilter::default();
