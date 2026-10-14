@@ -252,7 +252,7 @@ pub(super) fn max_spurt_speed(r: &mut sim_race::Race, i: usize) -> (f32, f32) {
         course_distance: r.info.race_course_set.distance,
         race_base_speed: r.info.base_speed,
     };
-    let mut calc = last_spurt::new_last_spurt(r, r.info.base_speed);
+    let mut calc = last_spurt::LastSpurt::new(r, r.info.base_speed);
     calc.calc_param = p;
     last_spurt::calc_last_spurt(r, &mut calc);
     let v = calc.last_spurt_target_speed;
