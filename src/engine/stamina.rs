@@ -1,6 +1,6 @@
 use uma_race_sim::api::RaceInput;
 
-use super::{Activation, HorseRun, HorseStats, Race, Run, SpurtKind, Work, ability_type, distance_at, gap_lengths, par_map, run_once, summarize, target_type};
+use super::{Activation, HorseRun, HorseStats, Race, Run, SpurtKind, Work, ability_type, distance_at, gap_lengths, par_map, resume, run_forking, run_once, sim_input, summarize, target_type};
 
 /// Raw stamina of "max stamina" (2000 after the sim halves the part over 1200, the game's cap).
 pub const MAX_STAMINA: i32 = 2800;
@@ -63,14 +63,16 @@ pub fn field_debuffs(race: &Race, input: &RaceInput, i: usize) -> Vec<(usize, i3
 
 /// Horse `i` of `input` on `seeds`: its batch stats; the same seeds with its stamina at `MAX_STAMINA` (lengths lost
 /// to stamina); and each HP-draining skill of another team muted, then all of them (what they cost it). Muting
-/// keeps the RNG draws and events, so a pair differs only by the effect. `with_debuffs` false skips the debuffs.
+/// keeps the RNG draws and events, so a pair differs only by the effect: a muted run resumes from the as-is run's last
+/// snapshot before the debuff first activated (`run_forking`), and runs only on seeds it hit the horse (elsewhere it
+/// took none of her HP, and the difference would be knock-on noise: its effect on the others, then diverging RNG).
+/// `with_debuffs` false skips the debuffs.
 pub fn stamina(race: &Race, input: &RaceInput, i: usize, seeds: &[i32], with_debuffs: bool, w: &Work) -> Stamina {
     let debuffs = if with_debuffs { field_debuffs(race, input, i) } else { vec![] };
-    let run = |seed: i32, edit: &dyn Fn(&mut RaceInput)| {
+    let at = |seed: i32| {
         let mut inp = RaceInput { random_seed: seed, ..input.clone() };
         inp.horses[i].viewer_id = 1; // dense frames near the goal (recording only), for `gap_lengths`
-        edit(&mut inp);
-        run_once(race, &inp)
+        inp
     };
     let mute = |inp: &mut RaceInput, &(o, id): &(usize, i32)| inp.horses[o].muted_skills.push(id);
     // Debuff (o, id) in `a`: whether it activated, and when it first hit horse i.
@@ -81,24 +83,39 @@ pub fn stamina(race: &Race, input: &RaceInput, i: usize, seeds: &[i32], with_deb
     };
     let outcome = |r: &Run| Outcome { full: r.horses[i].full_spurt, out: r.horses[i].hp_out };
     let any = !debuffs.is_empty();
+    // Each debuff, then all of them.
+    let triggers: Vec<Vec<(usize, i32)>> = debuffs.iter().map(|&d| vec![d]).chain(any.then(|| debuffs.clone())).collect();
     let res: Vec<SeedResult> = par_map(seeds.len(), w, |s| {
-        let a = run(seeds[s], &|_| {});
-        let max = run(seeds[s], &|inp| inp.horses[i].stamina = MAX_STAMINA);
+        let base = at(seeds[s]);
+        let sim_base = sim_input(race, &base);
+        let (a, mut forks) = run_forking(race, &sim_base, &triggers);
+        let mut max = at(seeds[s]);
+        max.horses[i].stamina = MAX_STAMINA;
+        let max = run_once(race, &max);
+        let as_is = outcome(&a);
+        // `ds` muted, from fork `k` (it hit, so it activated).
+        let mut muted = |k: usize, ds: &[(usize, i32)]| {
+            let mut m = base.clone();
+            ds.iter().for_each(|d| mute(&mut m, d));
+            resume(forks[k].take().expect("a debuff that hit activated"), &sim_input(race, &m))
+        };
         let per: Vec<DebuffSeed> = debuffs
             .iter()
-            .map(|d| {
+            .enumerate()
+            .map(|(k, d)| {
                 let (fired, t) = hit(&a, d);
-                let m = run(seeds[s], &|inp| mute(inp, d));
+                let m = t.map(|_| muted(k, std::slice::from_ref(d)));
                 // Both runs are identical up to the hit: the HP gap at the next frame is what it took.
                 let f = t.and_then(|t| a.out.frames.iter().position(|f| f.time > t));
-                let hp_lost = f.and_then(|k| Some(m.out.frames.get(k)?.horses[i].hp - a.out.frames[k].horses[i].hp)).unwrap_or(0.0);
-                DebuffSeed { fired, hit_at: t.map(|t| distance_at(&a.out.frames, i, t)), hp_lost, muted: outcome(&m) }
+                let hp_lost = f.zip(m.as_ref()).and_then(|(k, m)| Some(m.out.frames.get(k)?.horses[i].hp - a.out.frames[k].horses[i].hp)).unwrap_or(0.0);
+                DebuffSeed { fired, hit_at: t.map(|t| distance_at(&a.out.frames, i, t)), hp_lost, muted: m.as_ref().map_or(as_is, outcome) }
             })
             .collect();
-        let all_muted = any.then(|| outcome(&run(seeds[s], &|inp| debuffs.iter().for_each(|d| mute(inp, d)))));
+        let hit_any = per.iter().any(|p| p.hit_at.is_some());
+        let all_muted = any.then(|| if hit_any { outcome(&muted(debuffs.len(), &debuffs)) } else { as_is });
         SeedResult {
             loss: (gap_lengths(&a.out.frames, &max.out.frames, i, a.goal), a.horses[i].spurt_kind),
-            as_is: outcome(&a),
+            as_is,
             full_at_max: max.horses[i].full_spurt,
             debuffs: per,
             all_muted,
@@ -128,11 +145,9 @@ pub fn stamina(race: &Race, input: &RaceInput, i: usize, seeds: &[i32], with_deb
                 hit_rate: hits.len() as f32 / n,
                 hp_lost: hits.iter().map(|&s| p(s).hp_lost).sum::<f32>() / hits.len().max(1) as f32,
                 full_hit: (over_hits(&full), over_hits(&|s| p(s).muted.full)),
-                // Muted, on the seeds it hit: elsewhere it can't have taken the horse's HP, and the difference there is
-                // knock-on noise (its effect on the others, then diverging RNG).
-                full: (rate(&full), rate(&|s| if p(s).hit_at.is_some() { p(s).muted.full } else { full(s) })),
+                full: (rate(&full), rate(&|s| p(s).muted.full)),
                 out_hit: (over_hits(&out), over_hits(&|s| p(s).muted.out)),
-                out: (rate(&out), rate(&|s| if p(s).hit_at.is_some() { p(s).muted.out } else { out(s) })),
+                out: (rate(&out), rate(&|s| p(s).muted.out)),
                 hit_at: hits.iter().filter_map(|&s| p(s).hit_at).collect(),
             }
         })
@@ -143,10 +158,8 @@ pub fn stamina(race: &Race, input: &RaceInput, i: usize, seeds: &[i32], with_deb
         loss: res.iter().map(|r| r.loss).collect(),
         full_at_max: rate(&|s| res[s].full_at_max),
         debuffs,
-        // Likewise only on the seeds some debuff hit.
         all_muted: any.then(|| {
-            let hit_any = |s: usize| res[s].debuffs.iter().any(|p| p.hit_at.is_some());
-            let m = |s: usize| res[s].all_muted.filter(|_| hit_any(s)).unwrap_or(res[s].as_is);
+            let m = |s: usize| res[s].all_muted.unwrap_or(res[s].as_is);
             (rate(&|s| m(s).full), rate(&|s| m(s).out))
         }),
     }
@@ -168,7 +181,7 @@ struct SeedResult {
     loss: (f32, SpurtKind),
     full_at_max: bool,
     debuffs: Vec<DebuffSeed>,
-    /// With every debuff muted (None without debuffs).
+    /// With every debuff muted (as is on seeds none hit; None without debuffs).
     all_muted: Option<Outcome>,
 }
 
@@ -179,6 +192,6 @@ struct DebuffSeed {
     hit_at: Option<f32>,
     /// HP it took then.
     hp_lost: f32,
-    /// With it muted.
+    /// With it muted (as is on seeds it didn't hit).
     muted: Outcome,
 }

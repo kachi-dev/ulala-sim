@@ -297,3 +297,59 @@ fn gains_fingerprint() {
     }
     std::fs::write(std::env::var("GAINS_FP").expect("GAINS_FP"), out).unwrap();
 }
+
+/// Fingerprint and timing of the shared-run measurements: `skill_gains` of owned skills (All skills, Blank, and a
+/// list mixing owned, unowned and upgrade candidates) and `stamina` in debuff fields, on two courses. Every result
+/// `{:?}` (f32 Debug round-trips exactly), written to `$OPT_FP`; diff two files to check a speed-up changed nothing.
+#[test]
+#[ignore]
+fn shared_run_fingerprint() {
+    let race = new_race();
+    let mut out = String::new();
+    let mut time = |label: String, f: &mut dyn FnMut() -> String| {
+        let t = std::time::Instant::now();
+        let s = f();
+        println!("{label}: {:.2?}", t.elapsed());
+        out += &format!("== {label}\n{s}\n");
+    };
+    // The ones that hit her (a Late Surger) first: the 4-debuff field is a realistic CM one.
+    let hit = [200901, 200891, 200771, 201441];
+    let rest = all_skills(&race).iter().filter(|k| !k.is_unique() && drains_hp(&race, k.id) && !hit.contains(&k.id)).map(|k| k.id).collect::<Vec<_>>();
+    let drains: Vec<i32> = hit.into_iter().chain(rest).collect();
+    for course in [race.input.course_set_id, cs_long(&race)] {
+        let mut input = race.input.clone();
+        set_course(&race, &mut input, course);
+        let (field, i) = npc_field(&race, &input, 0, true, 2, FIELD_MIN);
+        let ids: Vec<i32> = all_skills(&race).iter().filter(|k| !k.is_unique()).map(|k| k.id).collect();
+        let able = can_activate(&race, &field, i, ids);
+        // 10 owned skills that can activate here, spread over the list.
+        let mut owned = field.clone();
+        owned.horses[i].skills.extend(able.iter().step_by(able.len() / 10).take(10).map(|&skill_id| SkillInput { skill_id, level: 1 }));
+        let cur: Vec<i32> = owned.horses[i].skills.iter().map(|s| s.skill_id).collect();
+        for blank in [false, true] {
+            time(format!("course {course} gains owned={} blank={blank}", cur.len()), &mut || format!("{:?}", skill_gains(&race, &owned, i, &cur, blank, 64, &Work::default())));
+        }
+        // Owned, unowned and an upgrade (Corner Adept ◎ while owning ○) together.
+        let mut mixed = owned.clone();
+        if !cur.contains(&200332) {
+            mixed.horses[i].skills.push(SkillInput { skill_id: 200332, level: 1 });
+        }
+        let cands: Vec<i32> = cur.iter().copied().take(4).chain([200331, 201352]).collect();
+        time(format!("course {course} gains mixed"), &mut || format!("{:?}", skill_gains(&race, &mixed, i, &cands, false, 16, &Work::default())));
+        for k in [4, drains.len()] {
+            let mut f = field.clone();
+            let npcs: Vec<usize> = (0..f.horses.len()).filter(|&h| h != i).collect();
+            for (j, &id) in drains.iter().take(k).enumerate() {
+                f.horses[npcs[j % npcs.len()]].skills.push(SkillInput { skill_id: id, level: 1 });
+            }
+            time(format!("course {course} stamina debuffs={k}"), &mut || {
+                let st = stamina(&race, &f, i, &seeds(7, 128), true, &Work::default());
+                let hits: Vec<String> = st.debuffs.iter().map(|d| format!("{}:{:.2}", d.skill_id, d.hit_rate)).collect();
+                println!("  hit rates {}", hits.join(" "));
+                format!("{st:?}")
+            });
+        }
+        time(format!("course {course} stamina no debuffs"), &mut || format!("{:?}", stamina(&race, &field, i, &seeds(7, 128), false, &Work::default())));
+    }
+    std::fs::write(std::env::var("OPT_FP").expect("OPT_FP"), out).unwrap();
+}

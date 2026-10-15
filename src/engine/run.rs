@@ -107,6 +107,61 @@ pub fn run_once(race: &Race, input: &RaceInput) -> Run {
     finish_run(r)
 }
 
+/// A paused race (state, past `tick::start`) that `resume` finishes; shared by the triggers that fork from it.
+pub(super) type Snap<'a> = std::rc::Rc<(sim_race::Race<'a>, bool)>;
+
+/// `run_once` of `input` (already `sim_input`), keeping per trigger (a set of (horse, skill)) the last snapshot before
+/// any of its skills first activated: one from before `tick::start` (passive skills activate in its first frame), then
+/// one every `FORK_EVERY` steps until every trigger fired. None = it never activated. A variant of `input` that differs
+/// only in those skills' effects (muted, swapped) is identical up to then, so `resume` from the snapshot gives the
+/// variant's run, bit for bit.
+pub(super) fn run_forking<'a>(race: &'a Race, input: &'a RaceInput, triggers: &[Vec<(usize, i32)>]) -> (Run, Vec<Option<Snap<'a>>>) {
+    let mut r = sim_race::init(input, &race.data);
+    let mut snap = Snap::new((r.clone(), false));
+    tick::start(&mut r);
+    let mut forks = vec![None; triggers.len()];
+    let (mut seen, mut steps, mut end) = (0, 0, false);
+    while forks.iter().any(Option::is_none) {
+        let new = &r.recorder.events[seen..];
+        for (f, t) in forks.iter_mut().zip(triggers).filter(|(f, _)| f.is_none()) {
+            // Skill event params: [horse, skill id, ..].
+            if new.iter().any(|e| e.kind == event_kind::SKILL && e.params.len() >= 2 && t.contains(&(e.params[0] as usize, e.params[1]))) {
+                *f = Some(snap.clone());
+            }
+        }
+        seen = r.recorder.events.len();
+        if end {
+            break;
+        }
+        if steps % FORK_EVERY == 0 && forks.iter().any(Option::is_none) {
+            snap = Snap::new((r.clone(), true));
+        }
+        end = tick::step(&mut r);
+        steps += 1;
+    }
+    if !end {
+        while !tick::step(&mut r) {}
+    }
+    tick::finish(&mut r);
+    (finish_run(r), forks)
+}
+
+/// The run of `input` from a `run_forking` snapshot.
+pub(super) fn resume<'a>(snap: Snap<'a>, input: &'a RaceInput) -> Run {
+    let (mut r, started) = Snap::try_unwrap(snap).unwrap_or_else(|s| (*s).clone());
+    r.input = input;
+    if !started {
+        tick::start(&mut r);
+    }
+    while !tick::step(&mut r) {}
+    tick::finish(&mut r);
+    finish_run(r)
+}
+
+/// `run_forking`'s snapshot interval in sim steps (1/15 s): a resumed run redoes at most this many. A clone costs ~6
+/// steps (mostly the horses' skill state), so sparse wins: measured fastest around 300 (20 s of race).
+const FORK_EVERY: usize = 300;
+
 /// `input` as `run_once` simulates it: custom races get popularity from the field.
 pub(super) fn sim_input<'a>(race: &Race, input: &'a RaceInput) -> std::borrow::Cow<'a, RaceInput> {
     if race.replay.is_none() && input.horses.len() > 1 { std::borrow::Cow::Owned(custom_popularity(input)) } else { std::borrow::Cow::Borrowed(input) }
