@@ -418,6 +418,14 @@ table.grid { border-collapse: collapse; width: 100%; }
 .who-sel { display: flex; align-items: center; gap: 10px; }
 table.gains td:first-child { width: 42%; }
 table.gains td { padding-top: 3px; padding-bottom: 3px; }
+/* Upgrade / downgrade: the owned version it's measured against, beside the bar (same row height). */
+.skcell { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.skcell .skr { flex: 1 1 auto; min-width: 0; }
+.swapnote { flex: none; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.swapnote b, .chartnote b { color: var(--sub-ink); font-weight: 700; }
+.swapline { margin: 0 0 10px; font-size: 13px; color: var(--sub-ink); }
+.swapline b { color: var(--ink); }
+.chartnote { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
 
 /* ---------- toast ---------- */
 .toast {

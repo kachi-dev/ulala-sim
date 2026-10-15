@@ -222,6 +222,7 @@ fn GainsResults() -> Element {
         _ => base,
     };
     // The chart always ranks by mean (its right column), whatever the table's sort.
+    let mut swaps = Vec::new();
     let chart: Vec<(String, String, [f32; 6], usize)> = r
         .items
         .iter()
@@ -235,6 +236,9 @@ fn GainsResults() -> Element {
                 (Some(_), false) => format!("{name} (downgrade)"),
                 (None, _) => name,
             };
+            if let Some(old) = g.replaces {
+                swaps.push((name.clone(), skill_info(old).name));
+            }
             let l = &g.lengths;
             (name, color, [l.p10, l.p25, l.p50, l.p75, l.p90, l.mean], g.samples.len())
         })
@@ -247,8 +251,24 @@ fn GainsResults() -> Element {
         let id = g.skill_id;
         rsx! {
             div { class: "gdetail", id: "gdetail",
+                if let Some(old) = old {
+                    p { class: "swapline",
+                        "Measured against "
+                        b { "{skill_info(old).name}" }
+                        ", which she has. Swapping it for {k.name} "
+                        if g.lengths.mean < 0.0 { "loses " } else { "gains " }
+                        b { "{g.lengths.mean.abs():.2} L" }
+                        " on average."
+                    }
+                }
                 div { class: "kpis",
-                    div { b { "{g.lengths.mean:+.2}" } span { "mean lengths" } }
+                    div {
+                        b { "{g.lengths.mean:+.2}" }
+                        span {
+                            "mean lengths"
+                            if let Some(old) = old { " vs {skill_info(old).name}" }
+                        }
+                    }
                     div { b { "{g.lengths.p50:+.2}" } span { "median" } }
                     div { b { "{g.lengths.min:+.2} to {g.lengths.max:+.2}" } span { "min to max" } }
                     div { b { "{pct(g.rate)}" } span { "activates" } }
@@ -304,6 +324,9 @@ fn GainsResults() -> Element {
             } else {
                 if r.items.len() > CHART_ROWS { p { class: "muted small", "Top {CHART_ROWS} by mean gain:" } }
                 GainChart { rows: chart }
+                for (name, old) in swaps {
+                    p { class: "chartnote", b { "{name}" } ": gain over {old}, which she has." }
+                }
             }
         }
         if !r.items.is_empty() {
@@ -334,11 +357,16 @@ fn GainsResults() -> Element {
                                         }
                                     },
                                     td {
-                                        {skill_row(&k, None, "")}
                                         if let Some(old) = g.replaces {
-                                            div { class: "muted small", title: "Measured against {skill_info(old).name}, which she has",
-                                                if g.upgrade { "Upgrade" } else { "Downgrade" }
+                                            div { class: "skcell",
+                                                {skill_row(&k, None, "")}
+                                                span { class: "swapnote",
+                                                    if g.upgrade { "upgrade of " } else { "downgrade of " }
+                                                    b { "{skill_info(old).name}" }
+                                                }
                                             }
+                                        } else {
+                                            {skill_row(&k, None, "")}
                                         }
                                     }
                                     td { class: tone(GainCol::Mean, g.lengths.mean, "num"), b { "{g.lengths.mean:+.2}" } }
