@@ -26,6 +26,10 @@ jobs:
       - run: cargo build --release
       - run: choco install innosetup -y --no-progress
       - run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DVersion=$("${{ github.ref_name }}".Substring(1))" ulala.iss'
-      - run: gh release create ${{ github.ref_name }} target/installer/ulala-setup.exe target/release/ulala.exe --generate-notes
+      # The version's CHANGELOG.md section (what the app shows after updating) above the generated notes.
+      - run: |
+          $lines = Get-Content CHANGELOG.md; $i = [array]::IndexOf($lines, "## $("${{ github.ref_name }}".Substring(1))"); $go = $i -ge 0
+          $notes = ($lines | Select-Object -Skip ($i + 1) | ForEach-Object { if ($_ -like '## *') { $go = $false }; if ($go) { $_ } }) -join "`n"
+          gh release create ${{ github.ref_name }} target/installer/ulala-setup.exe target/release/ulala.exe --notes "$notes" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

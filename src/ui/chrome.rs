@@ -63,6 +63,37 @@ pub fn TitleBar() -> Element {
             }
         }
     });
+    // A newer GitHub release, checked once per launch (also clears out the exe the last update replaced).
+    let mut update = use_signal(|| None::<String>);
+    let mut updating = use_signal(|| false);
+    use_future(move || async move {
+        let h = std::thread::spawn(|| {
+            let v = newer_release();
+            clean_old_exe();
+            v
+        });
+        while !h.is_finished() {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        update.set(h.join().ok().flatten());
+    });
+    let mut s2 = s;
+    let mut start_update = move |v: String| {
+        updating.set(true);
+        spawn(async move {
+            let h = std::thread::spawn(move || install_release(&v));
+            while !h.is_finished() {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            match h.join().unwrap_or_else(|_| Err("panic".into())) {
+                Ok(()) => window().close(),
+                Err(e) => {
+                    updating.set(false);
+                    s2.err.set(Some(format!("Update failed ({e}). The installer is on {RELEASES_URL}")));
+                }
+            }
+        });
+    };
     let ready = s.race.read().is_some();
     let mut options = use_signal(|| false);
     rsx! {
@@ -89,6 +120,17 @@ pub fn TitleBar() -> Element {
                 button { class: "btn ghost tb-races", title: "Open a saved race (Ctrl+O)", onclick: move |_| open_saves(s), "Races" }
             }
             div { class: "tb-tools",
+                if let Some(v) = update() {
+                    span { class: "tb-ver old", title: "This version is out of date: v{v} is available", "v{VERSION}" }
+                    button {
+                        class: "btn small tb-update",
+                        disabled: updating(),
+                        onclick: move |_| start_update(v.clone()),
+                        if updating() { "Updating…" } else { "Update to v{v}" }
+                    }
+                } else {
+                    span { class: "tb-ver", title: "Ulala version (up to date)", "v{VERSION}" }
+                }
                 button {
                     class: "tb-btn",
                     title: "Toggle light / dark theme",

@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Deserialize;
 use uma_race_sim::api::RaceInput;
+use uma_race_sim::data::master::Master;
 use uma_race_sim::data::{DATA_DIR, DataEra, GameData};
 
 use super::app_dir;
@@ -65,6 +66,15 @@ const DATA_REPO: &str = "kachi-dev/uma-race-simulator";
 const DATA_BRANCH: &str = "master";
 /// Why the last `sync_data` failed, for the load error when there is no cached copy either.
 static SYNC_ERR: OnceLock<String> = OnceLock::new();
+/// What this launch's `sync_data` brought in (`data_changes`), until `data_update_notes` takes it.
+static SYNC_NOTES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// The game data update this launch synced, as changelog lines (empty when nothing changed); waits for the sync, so
+/// call it off the UI thread. Taken once.
+pub fn data_update_notes() -> Vec<String> {
+    data_dir();
+    std::mem::take(&mut *SYNC_NOTES.lock().unwrap_or_else(|e| e.into_inner()))
+}
 
 /// `ULALA_DATA_DIR` at runtime, else the sim checkout this was built from (source builds), else the copy of the sim
 /// repo's `data/` in `%LOCALAPPDATA%/ulala/data`, synced from GitHub on the first call of each launch (`sync_data`).
@@ -111,6 +121,12 @@ fn sync_data(dir: &Path) -> Result<(), String> {
         .filter_map(|e| Some((e.path.strip_prefix("data/")?, e.sha.as_str())))
         .filter(|(p, sha)| std::fs::read(dir.join(p)).map_or(true, |b| blob_sha(&b) != *sha))
         .collect();
+    // The copies being replaced, to tell users what changed (none on the first sync: nothing to compare against).
+    let syncing = |f: &str| todo.iter().any(|t| t.0 == f);
+    let names_file = dir.join("names.json");
+    let master_file = dir.join("master_sim.db");
+    let old_names = syncing("names.json").then(|| read_names(&names_file)).flatten();
+    let old_master = syncing("master_sim.db").then(|| Master::load(&master_file).ok()).flatten();
     let fetch = |path: &str, sha: &str| -> Result<(), String> {
         let url = format!("https://raw.githubusercontent.com/{DATA_REPO}/{DATA_BRANCH}/data/{path}");
         let body = agent.get(&url).call().map_err(err)?.body_mut().with_config().limit(u64::MAX).read_to_vec().map_err(err)?;
@@ -124,7 +140,62 @@ fn sync_data(dir: &Path) -> Result<(), String> {
         std::fs::write(&part, body).and_then(|_| std::fs::rename(&part, &to)).map_err(|e| format!("{}: {e}", to.display()))
     };
     let res = super::par_map(todo.len(), &super::Work::default(), |i| fetch(todo[i].0, todo[i].1));
+    // A file whose download failed still reads as the old copy, so its changes wait for the sync that gets it.
+    if old_names.is_some() || old_master.is_some() {
+        let names = read_names(&names_file).unwrap_or_default();
+        let master = old_master.as_ref().and_then(|_| Master::load(&master_file).ok());
+        *SYNC_NOTES.lock().unwrap_or_else(|e| e.into_inner()) = data_changes(old_names.as_ref(), old_master.as_ref(), &names, master.as_ref());
+    }
     res.into_iter().find_map(|r| r.1.err()).map_or(Ok(()), Err)
+}
+
+/// Changelog lines for a data update: umas, skills and Champions Meetings new in `names`, then skills whose conditions or effects
+/// differ between the two masters (named from `names`; inherited copies share their unique's name, listed once).
+fn data_changes(old_names: Option<&Names>, old: Option<&Master>, names: &Names, new: Option<&Master>) -> Vec<String> {
+    let skill_name = |id: &i32| names.skill.get(id).map(|s| s.name.clone());
+    let sorted = |mut ids: Vec<i32>| {
+        ids.sort();
+        ids
+    };
+    let mut out: Vec<String> = vec![];
+    if let Some(o) = old_names {
+        for id in sorted(names.card.keys().filter(|id| !o.card.contains_key(id)).copied().collect()) {
+            let c = &names.card[&id];
+            out.push(format!("New uma: {} {}", c.title, names.chara.get(&c.chara_id).map_or("", |n| n.as_str())));
+        }
+        out.extend(sorted(names.skill.keys().filter(|id| !o.skill.contains_key(id)).copied().collect()).iter().filter_map(skill_name).map(|n| format!("New skill: {n}")));
+        out.extend(names.cm.iter().rev().filter(|c| !o.cm.iter().any(|p| p.id == c.id)).map(|c| format!("New Champions Meeting: {} (starts {})", c.name, c.start)));
+    }
+    if let (Some(old), Some(new)) = (old, new) {
+        for id in sorted(new.skill_data.keys().copied().collect()) {
+            let (Some(a), b, Some(name)) = (old.skill_data.get(&id), &new.skill_data[&id], skill_name(&id)) else { continue };
+            if a == b {
+                continue;
+            }
+            let cond = a.details.iter().zip(&b.details).any(|(x, y)| x.precondition != y.precondition || x.condition != y.condition);
+            let unconditioned = |s: &uma_race_sim::data::master::SkillData| {
+                let mut s = s.clone();
+                for d in &mut s.details {
+                    d.precondition.clear();
+                    d.condition.clear();
+                }
+                s
+            };
+            let what = match (cond, unconditioned(a) != unconditioned(b)) {
+                (true, true) => "conditions and effects",
+                (true, false) => "conditions",
+                _ => "effects",
+            };
+            out.push(format!("{name}: {what} changed"));
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|l| seen.insert(l.clone()));
+    out
+}
+
+fn read_names(path: &Path) -> Option<Names> {
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
 /// Git's blob hash of `bytes` (what the GitHub tree lists as `sha`).
@@ -152,8 +223,8 @@ pub(super) fn game_data(era: DataEra) -> Result<Arc<GameData>, String> {
     Ok(cache().entry(era).or_insert(d).clone())
 }
 
-/// assets/names.json (tools/gen_names.py, from master.mdb text_data).
-#[derive(Deserialize)]
+/// names.json in the game data (written with master_sim.db by the sim repo's extract_master, from master.mdb text_data).
+#[derive(Default, Deserialize)]
 pub(super) struct Names {
     pub(super) card: HashMap<i32, CardRow>,
     pub(super) chara: HashMap<i32, String>,
@@ -245,5 +316,39 @@ pub(super) struct SkillName {
 
 pub(super) fn names() -> &'static Names {
     static N: OnceLock<Names> = OnceLock::new();
-    N.get_or_init(|| serde_json::from_str(include_str!("../../assets/names.json")).expect("assets/names.json"))
+    // Empty when the data never downloaded: game_data then reports why.
+    N.get_or_init(|| read_names(&data_dir().join("names.json")).unwrap_or_default())
+}
+
+#[test]
+fn data_update_lines() {
+    let names = |cards: &str, skills: &str, cm: &str| -> Names {
+        serde_json::from_str(&format!(r#"{{"card":{{{cards}}},"chara":{{"1001":"Narita Brian"}},"skill":{{{skills}}},"race":{{}},"track":{{}},"cm":[{cm}]}}"#)).unwrap()
+    };
+    let card = r#""100101":["[Old]",1001,0,1,0,0,0,0,0,0,0,0,0,0]"#;
+    let cm = r#"[1,"Taurus Cup","2026-05-01",0,0,0,0,0,0]"#;
+    let old = names(card, r#""200001":["Swift","",1]"#, cm);
+    let new = names(
+        &format!(r#"{card},"100102":["[Ravenous Wolf]",1001,0,1,0,0,0,0,0,0,0,0,0,0]"#),
+        r#""200001":["Swift","",1],"200002":["Free from the Ashes","",1],"100001":["Wolf","",1],"900001":["Wolf","",1]"#,
+        &format!(r#"[2,"Libra Cup","2026-10-20",0,0,0,0,0,0],{cm}"#),
+    );
+    let (mut a, mut b) = (Master::default(), Master::default());
+    for id in [200001, 100001, 900001] {
+        let mut s = uma_race_sim::data::master::SkillData { id, ..Default::default() };
+        a.skill_data.insert(id, s.clone());
+        if id == 200001 {
+            s.details[0].condition = "phase==1".into();
+        } else {
+            s.details[0].float_ability_time = 50000;
+        }
+        b.skill_data.insert(id, s);
+    }
+    assert_eq!(
+        data_changes(Some(&old), Some(&a), &new, Some(&b)),
+        ["New uma: [Ravenous Wolf] Narita Brian", "New skill: Wolf", "New skill: Free from the Ashes",
+            "New Champions Meeting: Libra Cup (starts 2026-10-20)",
+            "Wolf: effects changed", "Swift: conditions changed"]
+    );
+    assert!(data_changes(None, None, &new, Some(&b)).is_empty());
 }

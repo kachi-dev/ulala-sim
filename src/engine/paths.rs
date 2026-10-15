@@ -74,6 +74,18 @@ pub fn set_cpu_pref(pct: u8) {
     save(&p);
 }
 
+/// Records `version` as the last one whose changelog was shown, returning whether it's new to this settings file
+/// (never on the first launch: a fresh install has nothing to compare against).
+pub(super) fn mark_seen(version: &str) -> bool {
+    let mut p = paths();
+    if p.seen.as_deref() == Some(version) {
+        return false;
+    }
+    p.seen = Some(version.to_string());
+    save(&p);
+    !p.first
+}
+
 /// Worker threads for long jobs.
 pub fn worker_threads() -> usize {
     threads_at(cpu_pref())
@@ -100,6 +112,9 @@ struct Settings {
     compact: Option<bool>,
     #[serde(default)]
     cpu: Option<u8>,
+    /// The last version whose changelog was shown.
+    #[serde(default)]
+    seen: Option<String>,
 }
 
 fn settings_file() -> Option<PathBuf> {
@@ -107,7 +122,7 @@ fn settings_file() -> Option<PathBuf> {
 }
 
 fn save(p: &Paths) {
-    save_settings(&Settings { game_dir: p.game.clone(), horseact_output: p.output.clone(), compact: p.compact, cpu: p.cpu });
+    save_settings(&Settings { game_dir: p.game.clone(), horseact_output: p.output.clone(), compact: p.compact, cpu: p.cpu, seen: p.seen.clone() });
 }
 
 fn save_settings(s: &Settings) {
@@ -124,6 +139,7 @@ struct Paths {
     first: bool,
     compact: Option<bool>,
     cpu: Option<u8>,
+    seen: Option<String>,
 }
 
 /// Stored in `%LOCALAPPDATA%/ulala/settings.json`; looked up again while missing or gone (e.g. horseACT installed
@@ -135,13 +151,13 @@ fn paths() -> MutexGuard<'static, Paths> {
         let first = saved.is_none();
         let saved = saved.unwrap_or_default();
         let game = saved.game_dir.clone().filter(|d| is_game(d)).or_else(find_game);
-        let (compact, cpu) = (saved.compact, saved.cpu);
+        let (compact, cpu, seen) = (saved.compact, saved.cpu, saved.seen);
         if let Some(out) = saved.horseact_output.filter(|p| p.is_dir()) {
-            return Mutex::new(Paths { game, output: Some(out), first, compact, cpu });
+            return Mutex::new(Paths { game, output: Some(out), first, compact, cpu, seen });
         }
         let output = game.as_deref().and_then(horseact_output);
-        save_settings(&Settings { game_dir: saved.game_dir, horseact_output: output.clone(), compact, cpu });
-        Mutex::new(Paths { game, output, first, compact, cpu })
+        save_settings(&Settings { game_dir: saved.game_dir, horseact_output: output.clone(), compact, cpu, seen: seen.clone() });
+        Mutex::new(Paths { game, output, first, compact, cpu, seen })
     })
     .lock()
     .unwrap_or_else(|e| e.into_inner())

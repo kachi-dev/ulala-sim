@@ -394,6 +394,7 @@ pub fn App() -> Element {
             setup::Picker {}
             SavesModal {}
             NoHorseAct {}
+            WhatsNew {}
             Toast {}
             chrome::TitleBar {}
         }
@@ -544,6 +545,51 @@ fn NoHorseAct() -> Element {
             SetupHint { heading: true }
             p { class: "muted small", "You can still open race files with Ctrl+O or by dropping them on the window." }
             button { class: "btn", onclick: move |_| open.set(false), "OK" }
+        }
+    }
+}
+
+/// The changelog, the first time a new version opens (engine::unseen_changelog), and what a game data update
+/// changed, once the launch's data sync is done (engine::data_update_notes).
+#[component]
+fn WhatsNew() -> Element {
+    let mut notes = use_signal(unseen_changelog);
+    let mut data = use_signal(Vec::<String>::new);
+    use_future(move || async move {
+        let h = std::thread::spawn(data_update_notes);
+        while !h.is_finished() {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        data.set(h.join().unwrap_or_default());
+    });
+    let lines = notes().unwrap_or_default();
+    if lines.is_empty() && data.read().is_empty() {
+        return rsx! {};
+    }
+    let mut close = move || {
+        notes.set(None);
+        data.set(vec![]);
+    };
+    rsx! {
+        div { class: "scrim top", onclick: move |_| close() }
+        div { class: "modal notice",
+            if !lines.is_empty() {
+                h3 { "What's new in v{VERSION}" }
+                ul { class: "changelog",
+                    for l in lines {
+                        li { "{l}" }
+                    }
+                }
+            }
+            if !data.read().is_empty() {
+                h3 { "Game data updated" }
+                ul { class: "changelog",
+                    for l in data() {
+                        li { "{l}" }
+                    }
+                }
+            }
+            button { class: "btn", onclick: move |_| close(), "OK" }
         }
     }
 }

@@ -515,6 +515,9 @@ table.gains td { padding-top: 3px; padding-bottom: 3px; }
 .tb-btn.on { background: var(--hover); }
 .tb-tools { display: flex; align-self: stretch; }
 .tb-tools .tb-btn { width: 34px; }
+.tb-ver { align-self: center; padding: 0 8px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: default; }
+.tb-ver.old { text-decoration: line-through; opacity: .6; padding-right: 4px; }
+.tb-update { align-self: center; margin-right: 6px; }
 .menu-catch { position: fixed; inset: 0; z-index: 60; }
 .upick { position: relative; min-width: 0; }
 .upick-btn {
@@ -704,11 +707,13 @@ table.matrix td.never { color: var(--muted); background: repeating-linear-gradie
 .kb-v { text-align: right; }
 .ok-line { color: var(--good); font-weight: 700; padding: 6px 0; }
 /* Colours by class: a style string with two declarations lost its second one when Dioxus re-rendered the row. */
-.modal.notice { z-index: 12; top: 30vh; width: min(460px, 92vw); padding: 20px 22px; gap: 10px; }
+.modal.notice { z-index: 12; top: 30vh; max-height: 66vh; width: min(460px, 92vw); padding: 20px 22px; gap: 10px; }
 .modal.notice h3 { margin: 0; }
 .modal.notice p { margin: 0; }
 .modal.notice .btn { align-self: flex-end; }
 .modal.notice .btns { display: flex; gap: 8px; justify-content: flex-end; }
+/* Long lists shrink to fit .modal.notice and scroll; the headings and OK keep their size. */
+.changelog { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
 
 /* Skill outcomes (`outcome_class`). */
 .oline { height: 1lh; display: flex; align-items: center; }

@@ -41,4 +41,5 @@ Name: "{autoprograms}\Ulala"; Filename: "{app}\ulala.exe"
 Name: "{autodesktop}\Ulala"; Filename: "{app}\ulala.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\ulala.exe"; Description: "{cm:LaunchProgram,Ulala}"; Flags: nowait postinstall skipifsilent
+; Not skipifsilent: the in-app update runs this silently (src/engine/update.rs) and expects Ulala back.
+Filename: "{app}\ulala.exe"; Description: "{cm:LaunchProgram,Ulala}"; Flags: nowait postinstall
