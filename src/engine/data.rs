@@ -229,6 +229,9 @@ pub(super) struct Names {
     pub(super) card: HashMap<i32, CardRow>,
     pub(super) chara: HashMap<i32, String>,
     pub(super) skill: HashMap<i32, SkillName>,
+    /// SP to learn a skill with no hints, lower tiers of its group included; absent for uniques.
+    #[serde(default)]
+    pub(super) skill_sp: HashMap<i32, i32>,
     /// By race_instance id.
     pub(super) race: HashMap<i32, String>,
     pub(super) track: HashMap<i32, String>,

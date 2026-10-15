@@ -15,6 +15,39 @@ fn mini_hist(h: &[f32]) -> Element {
     }
 }
 
+/// Team win rates in a row: each team's tag, its members' icons, and the share of races one of them won.
+fn team_wr(res: &Res, cur: &Batch, base: Option<&Arc<Batch>>) -> Element {
+    let ts = teams(&res.input, res.player);
+    if ts.is_empty() {
+        return rsx! {};
+    }
+    let wr = |b: &Batch, t: i32| -> f32 {
+        res.input.horses.iter().zip(&b.horses).filter(|(h, _)| h.team_id == t).map(|(_, s)| s.win_rate).sum()
+    };
+    rsx! {
+        div { class: "team-wr",
+            span { class: "muted small", "Team win rate" }
+            for t in ts {
+                {
+                    let i0 = res.input.horses.iter().position(|h| h.team_id == t).unwrap_or(0);
+                    let now = wr(cur, t);
+                    let was = base.map(|b| wr(b, t));
+                    rsx! {
+                        div { key: "{t}", class: "tw",
+                            {team_tags(&res.input, res.player, i0)}
+                            for (i, h) in res.input.horses.iter().enumerate().filter(|(_, h)| h.team_id == t) {
+                                {horse_icon(h, Some(&res.colors[i]), "sm")}
+                            }
+                            b { "{pct(now)}" }
+                            if let Some(was) = was.filter(|&w| pct(w) != pct(now)) { {pp_delta(was, now, false)} }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, base: Option<&Arc<Batch>>) -> Element {
     let mut focus = s.focus;
     let f = *focus.read();
@@ -31,6 +64,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                 span { class: "muted", "click an uma for details" }
                 if improved { img { class: "great", src: "/a/great.webp", alt: "Great!" } }
             }
+            {team_wr(res, cur, base)}
             div { class: "scroll-x",
                 table { class: "grid results batch",
                     thead {

@@ -133,6 +133,11 @@ pub fn game_order(skills: &[SkillInput]) -> Vec<(usize, SkillInput)> {
     v
 }
 
+/// SP an uma paid for its skills, at full price (veterans don't record hints).
+pub fn skills_sp(skills: &[SkillInput]) -> i32 {
+    skills.iter().filter_map(|k| names().skill_sp.get(&k.skill_id)).sum()
+}
+
 /// Every skill the race's GameData knows, sorted by name (for the skill picker).
 pub fn all_skills(race: &Race) -> Arc<Vec<SkillInfo>> {
     skill_table(&race.data).all.clone()

@@ -62,7 +62,7 @@ pub(super) const TEAM_HUES: [[&str; 6]; 4] = [
 ];
 
 /// Team ids in display order (the player's first) when the field has more than one team, else empty.
-fn teams(input: &RaceInput, player: Option<usize>) -> Vec<i32> {
+pub(super) fn teams(input: &RaceInput, player: Option<usize>) -> Vec<i32> {
     let mut ids: Vec<i32> = input.horses.iter().map(|h| h.team_id).filter(|&t| t != 0).collect();
     ids.sort();
     ids.dedup();

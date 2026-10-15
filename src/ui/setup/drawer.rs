@@ -15,6 +15,7 @@ pub fn Picker() -> Element {
     let sort = use_signal(|| 0);
     let need = use_signal(Vec::new);
     let apt_min = use_signal(|| [0; 10]);
+    let mins = use_signal(|| [0; 3]);
     if !*s.picker.read() {
         return rsx! {};
     }
@@ -48,7 +49,7 @@ pub fn Picker() -> Element {
                 button { class: "btn icon", title: "Close", onclick: move |_| s.picker.set(false), {icon("x")} }
             }
             if vets() {
-                VeteranList { q: ql, sort, need, apt_min, replace }
+                VeteranList { q: ql, sort, need, apt_min, mins, replace }
             } else {
             div { class: "cgroups",
                 if groups.is_empty() { p { class: "muted", "No uma matches." } }
@@ -89,7 +90,7 @@ pub fn Picker() -> Element {
     }
 }
 
-const VET_SORTS: [&str; 8] = ["Newest", "Oldest", "Rating", "Speed", "Stamina", "Power", "Guts", "Wit"];
+const VET_SORTS: [&str; 9] = ["Newest", "Oldest", "Rating", "SP", "Speed", "Stamina", "Power", "Guts", "Wit"];
 /// Aptitude rows of the veteran cards and filters; `vet_apts` order.
 const APT_ROWS: [(&str, usize, &[&str]); 3] =
     [("Surface", 0, &SURFACES), ("Distance", 2, &DISTANCES), ("Style", 6, &STYLES)];
@@ -117,70 +118,99 @@ fn VeteranList(
     mut sort: Signal<usize>,
     mut need: Signal<Vec<i32>>,
     mut apt_min: Signal<[i32; 10]>,
+    /// Minimum rating, rank and speed; 0 = any.
+    mut mins: Signal<[i32; 3]>,
     replace: Option<usize>,
 ) -> Element {
     let mut s = use_context::<S>();
     let list = use_hook(|| Rc::new(load_veterans()));
     let mut skill_q = use_signal(String::new);
-    let mut show_apts = use_signal(|| false);
+    let mut skill_open = use_signal(|| false);
     let Ok(all) = &*list else {
         return rsx! {
             p { class: "muted vets-empty", "No veteran list in {saved_races_dir().display()}." }
             SetupHint { heading: false }
         };
     };
-    // Datalist of every skill some veteran has (inherited uniques marked: they share the unique's name).
-    let mut ids: Vec<i32> = all.iter().flat_map(|v| v.horse.skills.iter().map(|k| k.skill_id)).collect();
+    let need_v = need.cloned();
+    // Skill search: skills some veteran has, not yet required, by name.
+    let sq = skill_q.read().to_lowercase();
+    let mut ids: Vec<i32> = all.iter().flat_map(|v| v.horse.skills.iter().map(|k| k.skill_id)).filter(|id| !need_v.contains(id)).collect();
     ids.sort_unstable();
     ids.dedup();
-    let mut opts: Vec<(i32, String)> =
-        ids.into_iter().map(skill_info).map(|k| (k.id, if k.inherited { format!("{} (inherited)", k.name) } else { k.name })).collect();
-    opts.sort_by(|a, b| a.1.cmp(&b.1));
-    let opts = Rc::new(opts);
-    let picks = opts.clone();
-    let need_v = need.cloned();
+    let mut opts: Vec<SkillInfo> = if sq.is_empty() { vec![] } else { ids.into_iter().map(skill_info).filter(|k| k.name.to_lowercase().contains(&sq)).collect() };
+    opts.sort_by(|a, b| a.name.cmp(&b.name).then(a.inherited.cmp(&b.inherited)));
+    opts.truncate(30);
+    let first = opts.first().map(|k| k.id);
     let am = apt_min.cloned();
-    let n_apt = am.iter().filter(|&&g| g > 0).count();
+    let mn = mins.cloned();
+    let n_apt = am.iter().chain(&mn).filter(|&&g| g > 0).count();
+    let mut ranks: Vec<i32> = all.iter().map(|v| v.rank).collect();
+    ranks.sort_unstable_by(|a, b| b.cmp(a));
+    ranks.dedup();
     let has = |v: &Veteran, id: i32| v.horse.skills.iter().any(|k| k.skill_id == id);
     let mut hits: Vec<&Veteran> = all
         .iter()
         .filter(|v| chara_name(v.horse.chara_id).to_lowercase().contains(&q) || card_title(v.horse.card_id).to_lowercase().contains(&q))
         .filter(|v| need_v.iter().all(|&id| has(v, id)))
         .filter(|v| vet_apts(&v.horse).iter().zip(am).all(|(&a, m)| a >= m))
+        .filter(|v| v.rating >= mn[0] && v.rank >= mn[1] && v.horse.speed >= mn[2])
         .collect();
     match sort() {
         0 => hits.sort_by(|a, b| b.created.cmp(&a.created)),
         1 => hits.sort_by(|a, b| a.created.cmp(&b.created)),
         2 => hits.sort_by_key(|v| std::cmp::Reverse(v.rating)),
-        k => hits.sort_by_key(|v| std::cmp::Reverse(stats(&v.horse)[k - 3])),
+        3 => hits.sort_by_key(|v| std::cmp::Reverse(skills_sp(&v.horse.skills))),
+        k => hits.sort_by_key(|v| std::cmp::Reverse(stats(&v.horse)[k - 4])),
     }
     rsx! {
         div { class: "vet-bar",
-            input {
-                r#type: "search",
-                list: "vet-skills",
-                placeholder: "Filter by skill…",
-                value: "{skill_q}",
-                oninput: move |e| {
-                    let v = e.value();
-                    match picks.iter().find(|o| o.1 == v) {
-                        Some(&(id, _)) => {
-                            if !need.read().contains(&id) {
+            div { class: "vet-sk",
+                input {
+                    r#type: "search",
+                    placeholder: "Filter by skill…",
+                    value: "{skill_q}",
+                    oninput: move |e| {
+                        skill_q.set(e.value());
+                        skill_open.set(true);
+                    },
+                    onfocus: move |_| skill_open.set(true),
+                    onblur: move |_| skill_open.set(false),
+                    onkeydown: move |e| match e.key() {
+                        Key::Enter => {
+                            if let Some(id) = first {
                                 need.write().push(id);
+                                skill_q.set(String::new());
                             }
-                            skill_q.set(String::new());
                         }
-                        None => skill_q.set(v),
-                    }
-                },
-            }
-            datalist { id: "vet-skills",
-                for (id, name) in opts.iter() {
-                    option { key: "{id}", value: "{name}" }
+                        Key::Escape => skill_q.set(String::new()),
+                        _ => {}
+                    },
                 }
-            }
-            button { class: if show_apts() || n_apt > 0 { "chip-btn on" } else { "chip-btn" }, onclick: move |_| show_apts.toggle(),
-                if n_apt > 0 { "Aptitudes ({n_apt})" } else { "Aptitudes" }
+                if skill_open() && !sq.is_empty() {
+                    div { class: "vet-sk-menu",
+                        if opts.is_empty() { p { class: "muted small", "No veteran has a skill by that name." } }
+                        for k in opts {
+                            {
+                                let id = k.id;
+                                rsx! {
+                                    button {
+                                        key: "{id}",
+                                        class: "pick-card",
+                                        // mousedown, not click: keeps focus in the search so the menu stays for the next pick.
+                                        onmousedown: move |e| {
+                                            e.prevent_default();
+                                            need.write().push(id);
+                                            skill_q.set(String::new());
+                                        },
+                                        {skill_row(&k, None, "")}
+                                        div { class: "pick-desc", "{k.description}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             select { onchange: move |e| sort.set(e.value().parse().unwrap_or(0)),
                 for (i, l) in VET_SORTS.iter().enumerate() {
@@ -189,27 +219,47 @@ fn VeteranList(
             }
             span { class: "muted small", "{hits.len()} of {all.len()}" }
         }
-        if show_apts() {
-            div { class: "vet-aptf",
-                for (label, off, names) in APT_ROWS {
-                    div { class: "sf-row",
-                        span { class: "sf-label", "{label}" }
-                        for (j, n) in names.iter().enumerate() {
-                            label { class: "vaf",
-                                "{n}"
-                                select { onchange: move |e| apt_min.write()[off + j] = e.value().parse().unwrap_or(0),
-                                    option { value: "0", selected: am[off + j] == 0, "Any" }
-                                    for g in (1..=8).rev() {
-                                        option { value: "{g}", selected: am[off + j] == g, "≥{grade(g)}" }
-                                    }
+        div { class: "vet-aptf",
+            for (label, off, names) in APT_ROWS {
+                div { class: "sf-row",
+                    span { class: "sf-label", "{label}" }
+                    for (j, n) in names.iter().enumerate() {
+                        label { class: "vaf",
+                            "{n}"
+                            select { onchange: move |e| apt_min.write()[off + j] = e.value().parse().unwrap_or(0),
+                                option { value: "0", selected: am[off + j] == 0, "Any" }
+                                for g in (1..=8).rev() {
+                                    option { value: "{g}", selected: am[off + j] == g, "≥{grade(g)}" }
                                 }
                             }
                         }
                     }
                 }
-                if n_apt > 0 {
-                    button { class: "btn ghost small", onclick: move |_| apt_min.set([0; 10]), "Clear" }
+            }
+            div { class: "sf-row",
+                span { class: "sf-label", "Minimum" }
+                label { class: "vaf",
+                    "Rating"
+                    input { r#type: "number", min: "0", step: "1000", placeholder: "Any", value: if mn[0] > 0 { mn[0].to_string() } else { String::new() },
+                        oninput: move |e| mins.write()[0] = e.value().parse().unwrap_or(0) }
                 }
+                label { class: "vaf",
+                    "Rank"
+                    select { onchange: move |e| mins.write()[1] = e.value().parse().unwrap_or(0),
+                        option { value: "0", selected: mn[1] == 0, "Any" }
+                        for r in ranks {
+                            option { value: "{r}", selected: mn[1] == r, "≥{rank_label(r)}" }
+                        }
+                    }
+                }
+                label { class: "vaf",
+                    "Speed"
+                    input { r#type: "number", min: "0", step: "100", placeholder: "Any", value: if mn[2] > 0 { mn[2].to_string() } else { String::new() },
+                        oninput: move |e| mins.write()[2] = e.value().parse().unwrap_or(0) }
+                }
+            }
+            if n_apt > 0 {
+                button { class: "btn ghost small", onclick: move |_| { apt_min.set([0; 10]); mins.set([0; 3]); }, "Clear" }
             }
         }
         if !need_v.is_empty() {
@@ -229,6 +279,7 @@ fn VeteranList(
                     let h = v.horse.clone();
                     let st = stats(&h);
                     let apts = vet_apts(&h);
+                    let sp = skills_sp(&h.skills);
                     let sk: Vec<(SkillInfo, i32)> = game_order(&h.skills).into_iter().map(|(_, k)| (skill_info(k.skill_id), k.level)).collect();
                     let title = card_title(h.card_id);
                     let day = v.created.get(..10).unwrap_or(&v.created).to_string();
@@ -289,6 +340,7 @@ fn VeteranList(
                                                 }
                                             }
                                         }
+                                        if off == 0 { span { "SP" b { "{thousands(sp.max(0) as usize)}" } } }
                                     }
                                 }
                             }

@@ -6,3 +6,7 @@ Shown in the app the first time a new version opens; the release workflow also p
 - Performance improvements to Skill/Stamina sims
 - UI stuffs
 - other stuffs
+
+## 0.1.9
+- WR by team
+- Improved veteran uma picker (better filtering, SP count)
