@@ -1,4 +1,4 @@
-use uma_race_sim::api::{RaceInput, WizAlt, span_kind, wiz_mechanic};
+use uma_race_sim::api::{RaceInput, WizAlt, mechanic, span_kind, wiz_mechanic};
 
 use super::{HorseRun, Race, SkillOutcome, Work, gap_lengths, par_map, run_once};
 
@@ -26,6 +26,8 @@ pub struct WitSample {
     pub spurt_start: f32,
     /// Seconds in each of `WIT_MODES`.
     pub modes: [f32; WIT_MODES.len()],
+    /// Seconds of the released conserve-power boost.
+    pub conserve: f32,
 }
 
 /// One seed of one mechanic: the measured horse's race with the mechanic on the new Wit and on the old Wit.
@@ -53,6 +55,7 @@ fn sample(h: &HorseRun) -> WitSample {
         skills: h.skills.iter().filter(|c| c.outcome == SkillOutcome::Activated).count() as u8,
         spurt_start: h.spurt_start,
         modes: WIT_MODES.map(|(k, _)| h.state_time[k as usize]),
+        conserve: h.state_time[span_kind::CONSERVE_POWER as usize],
     }
 }
 
@@ -83,4 +86,28 @@ pub fn wit(race: &Race, input: &RaceInput, i: usize, old_wiz: i32, seeds: &[i32]
     });
     let column = |k: usize| res.iter().map(|r| r.1[k]).collect();
     Wit { rows: (0..wiz_mechanic::COUNT).map(column).collect(), all: column(wiz_mechanic::COUNT) }
+}
+
+/// `mechanic` bits in order, as the Other Mechanics tab names them.
+pub const MECHANICS: [&str; mechanic::COUNT] = ["Power conserve"];
+
+/// Horse `i` of `input` on `seeds` as set up, against the same with each `mechanic` muted: `rows[k]` is bit `1 << k`'s
+/// pair per seed (new = as set up, old = muted, so + = what the mechanic gained).
+pub fn mechanics(race: &Race, input: &RaceInput, i: usize, seeds: &[i32], w: &Work) -> Vec<Vec<WitPair>> {
+    let res = par_map(seeds.len(), w, |s| {
+        let run = |muted: u8| {
+            let mut inp = RaceInput { random_seed: seeds[s], ..input.clone() };
+            inp.horses[i].viewer_id = 1; // dense frames near the goal (recording only), for `gap_lengths`
+            inp.horses[i].muted_mechanics = muted;
+            run_once(race, &inp)
+        };
+        let a = run(0);
+        (0..mechanic::COUNT)
+            .map(|k| {
+                let b = run(1 << k);
+                WitPair { gain: gap_lengths(&a.out.frames, &b.out.frames, i, b.goal), new: sample(&a.horses[i]), old: sample(&b.horses[i]) }
+            })
+            .collect::<Vec<_>>()
+    });
+    (0..mechanic::COUNT).map(|k| res.iter().map(|r| r.1[k]).collect()).collect()
 }

@@ -13,6 +13,7 @@ mod skills;
 mod stamina;
 mod widgets;
 mod wit;
+mod mechanics;
 
 use jobs::*;
 use saves::*;
@@ -64,6 +65,7 @@ enum DetailTab {
     Skills,
     Stamina,
     Wit,
+    Mechanics,
 }
 
 /// Single-run result tabs: the table, or every uma's positions and skill activations.
@@ -148,6 +150,15 @@ struct WitRes {
     old: i32,
     new: i32,
     wit: Arc<Wit>,
+    rev: u64,
+}
+
+#[derive(Clone, PartialEq)]
+struct MechRes {
+    /// Field index in the batch it was measured on.
+    horse: usize,
+    /// Per `MECHANICS` entry: the pair per seed.
+    rows: Arc<Vec<Vec<WitPair>>>,
     rev: u64,
 }
 
@@ -241,6 +252,12 @@ struct S {
     w_res: Signal<Option<WitRes>>,
     /// Mechanic row open in the table.
     w_sel: Signal<Option<usize>>,
+    // Other Mechanics subtab of the batch uma detail
+    /// Seeds for the mechanics calculation.
+    m_n: Signal<usize>,
+    m_res: Signal<Option<MechRes>>,
+    /// Mechanic row open in the table.
+    m_sel: Signal<Option<usize>>,
     g_n: Signal<usize>,
     g_res: Signal<Option<GainsRes>>,
     g_sort: Signal<(gains::GainCol, bool)>,
@@ -329,6 +346,9 @@ pub fn App() -> Element {
         w_n: use_signal(|| 500),
         w_res: use_signal(|| None),
         w_sel: use_signal(|| None),
+        m_n: use_signal(|| 1000),
+        m_res: use_signal(|| None),
+        m_sel: use_signal(|| None),
         g_n: use_signal(|| 200),
         g_res: use_signal(|| None),
         g_sort: use_signal(|| (gains::GainCol::Mean, true)),

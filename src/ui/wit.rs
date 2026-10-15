@@ -24,7 +24,7 @@ pub(super) fn old_wit(s: S, input: &RaceInput, i: usize) -> Option<i32> {
 }
 
 /// Mean of `f` over the races of `v`: (old Wit, new Wit).
-fn means(v: &[WitPair], f: impl Fn(&WitSample) -> f32) -> (f32, f32) {
+pub(super) fn means(v: &[WitPair], f: impl Fn(&WitSample) -> f32) -> (f32, f32) {
     let n = v.len().max(1) as f32;
     (v.iter().map(|p| f(&p.old)).sum::<f32>() / n, v.iter().map(|p| f(&p.new)).sum::<f32>() / n)
 }
@@ -91,19 +91,14 @@ pub(super) fn wit_cards(h: &HorseStats, b: Option<&HorseStats>, diff: Option<&Ba
     }
 }
 
-/// Horse `i` of the batch on screen, whose baseline Wit was `old`: the length calculation's button (beside the
-/// detail's subtabs).
+/// Horse `i` of the batch on screen: the length calculation's button (beside the detail's subtabs), when its Wit as set
+/// up differs from the baseline's.
 #[component]
-pub(super) fn WitRun(i: usize, old: i32) -> Element {
+pub(super) fn WitRun(i: usize) -> Element {
     let s = use_context::<S>();
     let running = use_busy(s);
-    let res = s.res.cloned();
-    let Some(input) = res.and_then(|r| match r.kind {
-        Kind::Batch { .. } => Some(r.input),
-        Kind::Single { .. } => None,
-    }) else {
-        return rsx! {};
-    };
+    let Some(input) = setup_for(s, i) else { return rsx! {} };
+    let Some(old) = old_wit(s, &input, i) else { return rsx! {} };
     let new = input.horses[i].wiz;
     let n = *s.w_n.read();
     // Per seed: the baseline, then each mechanic on the new Wit, then all of them.
@@ -133,11 +128,13 @@ pub(super) fn WitRun(i: usize, old: i32) -> Element {
     }
 }
 
-/// The measurement of horse `i` (Wit `old` on the baseline), once simulated.
+/// The measurement of horse `i`, once simulated (for its Wit on the baseline and as set up).
 #[component]
-pub(super) fn WitOut(i: usize, old: i32) -> Element {
+pub(super) fn WitOut(i: usize) -> Element {
     let s = use_context::<S>();
-    let new = s.res.read().as_ref().map_or(0, |r| r.input.horses[i].wiz);
+    let input = s.input.read();
+    let Some(old) = old_wit(s, &input, i) else { return rsx! {} };
+    let new = input.horses[i].wiz;
     match s.w_res.cloned().filter(|r| (r.horse, r.old, r.new) == (i, old, new)) {
         Some(r) => rsx! { WitResults { r } },
         None => rsx! {},
@@ -147,7 +144,7 @@ pub(super) fn WitOut(i: usize, old: i32) -> Element {
 #[component]
 fn WitResults(r: WitRes) -> Element {
     let s = use_context::<S>();
-    let mut wsel = s.w_sel;
+    let wsel = s.w_sel;
     let rev = r.rev;
     let stale = use_stale(s, move || Some(rev));
     let rows = &r.wit.rows;
@@ -165,12 +162,6 @@ fn WitResults(r: WitRes) -> Element {
     let downhill = used.iter().copied().find(|&m| is_downhill(m));
     let pk: Vec<usize> = used.iter().copied().filter(|&m| !is_downhill(m)).collect();
     let pp = |(o, n): (f32, f32), lower_better: bool| pp_delta(o, n, lower_better);
-    // Mechanics by mean gain, most first.
-    let mut order: Vec<usize> = (0..WIT_MECHANICS.len()).collect();
-    order.sort_by(|&a, &b| gain(&rows[b]).total_cmp(&gain(&rows[a])));
-    let row = |name: &str, color: &str, v: &[WitPair]| (name.to_string(), color.to_string(), box_stats(v), v.len());
-    let mut chart: Vec<(String, String, [f32; 6], usize)> = order.iter().map(|&k| row(WIT_MECHANICS[k], "var(--accent)", &rows[k])).collect();
-    chart.push(row("Total", "var(--accent-2)", all));
     // Per mechanic: what it changes besides lengths, old to new Wit.
     let effect = |k: usize| -> Element {
         let v = &rows[k];
@@ -201,8 +192,28 @@ fn WitResults(r: WitRes) -> Element {
             _ => none,
         }
     };
+    mechanic_results(&WIT_MECHANICS, rows, Some(all), wsel, stale(), effect)
+}
+
+/// Lengths gained per mechanic (`names[k]`, `rows[k]`), most first, then `total` (all at once): the chart, and the table
+/// with `effect(k)` whose row `k` opens its histogram (`sel`). The Wit and Other Mechanics tabs.
+pub(super) fn mechanic_results(
+    names: &[&str],
+    rows: &[Vec<WitPair>],
+    total: Option<&[WitPair]>,
+    mut sel: Signal<Option<usize>>,
+    stale: bool,
+    effect: impl Fn(usize) -> Element,
+) -> Element {
+    let mut order: Vec<usize> = (0..names.len()).collect();
+    order.sort_by(|&a, &b| gain(&rows[b]).total_cmp(&gain(&rows[a])));
+    let row = |name: &str, color: &str, v: &[WitPair]| (name.to_string(), color.to_string(), box_stats(v), v.len());
+    let mut chart: Vec<(String, String, [f32; 6], usize)> = order.iter().map(|&k| row(names[k], "var(--accent)", &rows[k])).collect();
+    if let Some(all) = total {
+        chart.push(row("Total", "var(--accent-2)", all));
+    }
     rsx! {
-        if stale() {
+        if stale {
             div { class: "stale", "The setup changed since this run. Simulate again to update it." }
         }
         h4 { "Lengths gained per mechanic" }
@@ -223,11 +234,11 @@ fn WitResults(r: WitRes) -> Element {
                         {
                             let v = &rows[k];
                             let changed = changed(v);
-                            let open = *wsel.read() == Some(k);
+                            let open = *sel.read() == Some(k);
                             rsx! {
                                 tr { key: "{k}", class: if open { "sel" },
-                                    onclick: move |_| wsel.set(if open { None } else { Some(k) }),
-                                    td { b { "{WIT_MECHANICS[k]}" } }
+                                    onclick: move |_| sel.set(if open { None } else { Some(k) }),
+                                    td { b { "{names[k]}" } }
                                     td { class: "num", "{gain(v):+.2} L" }
                                     td { class: "num", "{pct(changed.len() as f32 / v.len().max(1) as f32)}" }
                                     td { {effect(k)} }

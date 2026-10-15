@@ -269,6 +269,23 @@ fn wit_mechanics() {
     assert!(w.rows.iter().chain([&w.all]).all(|r| r.iter().zip(&w.all).all(|(p, q)| p.old == q.old)));
 }
 
+#[test]
+fn other_mechanics() {
+    let race = new_race();
+    let mut input = race.input.clone();
+    input.horses = vec![new_horse(&race, 105201), new_horse(&race, cards()[0].card_id)];
+    // Power 1000: nothing to conserve, so muting it changes nothing.
+    input.horses[0].pow = 1000;
+    let m = mechanics(&race, &input, 0, &seeds(1, 4), &Work::default());
+    assert_eq!(m.len(), MECHANICS.len());
+    assert!(m.iter().flatten().all(|p| p.gain == 0.0 && p.new == p.old));
+    // Power 1600: the boost is released (never when muted), and it gains lengths on average.
+    input.horses[0].pow = 1600;
+    let m = mechanics(&race, &input, 0, &seeds(1, 16), &Work::default());
+    assert!(m[0].iter().any(|p| p.new.conserve > 0.0) && m[0].iter().all(|p| p.old.conserve == 0.0));
+    assert!(m[0].iter().map(|p| p.gain).sum::<f32>() > 0.0);
+}
+
 /// Fingerprint of `skill_gains` (every non-unique candidate that can activate, 16 seeds, NPC field, two courses, with
 /// owned ○ skills so swaps are covered): one line per skill, samples as f32 bits. Written to `$GAINS_FP`; diff two
 /// files to check a speed-up changed nothing.

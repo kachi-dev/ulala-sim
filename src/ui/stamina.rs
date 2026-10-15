@@ -29,10 +29,8 @@ pub(super) fn stamina_cards(h: &HorseStats, b: Option<&HorseStats>, cv: &CourseV
 pub(super) fn StaminaRun(i: usize) -> Element {
     let s = use_context::<S>();
     let running = use_busy(s);
-    let (Some(r), Some(race)) = (s.res.cloned(), s.race.cloned()) else { return rsx! {} };
-    let Kind::Batch { base, .. } = &r.kind else { return rsx! {} };
-    let (input, cv) = (r.input.clone(), r.cv.clone());
-    let base = s.baseline.cloned().filter(|b| base.is_some() && has_edits(Some(b), &input));
+    let (Some(input), Some(race), Some(cv)) = (setup_for(s, i), s.race.cloned(), s.cview.cloned()) else { return rsx! {} };
+    let base = s.baseline.cloned().filter(|b| has_edits(Some(b), &input));
     let n = *s.st_n.read();
     // Per seed: as is, at max stamina, each debuff muted, all muted; the baseline as is and at max stamina.
     let n_debuffs = field_debuffs(&race, &input, i).len();

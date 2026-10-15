@@ -51,6 +51,15 @@ pub(super) fn use_busy(s: S) -> Memo<bool> {
     use_memo(move || s.job.read().is_some())
 }
 
+/// The setup a detail subtab measures batch uma `i` on: the current one (so Calculate follows edits since the batch),
+/// while its uma `i` is still the batch's.
+pub(super) fn setup_for(s: S, i: usize) -> Option<RaceInput> {
+    let res = s.res.read();
+    let r = res.as_ref().filter(|r| matches!(r.kind, Kind::Batch { .. }))?;
+    let input = s.input.read();
+    (input.horses.get(i)?.card_id == r.input.horses.get(i)?.card_id).then(|| input.clone())
+}
+
 /// Results (run at setup `rev()`) are older than the setup. Memoised, so readers don't re-render on every edit.
 pub(super) fn use_stale(s: S, rev: impl Fn() -> Option<u64> + 'static) -> Memo<bool> {
     use_memo(move || rev().is_some_and(|r| r != *s.rev.read()))

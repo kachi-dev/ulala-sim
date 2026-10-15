@@ -31,9 +31,6 @@ pub(super) fn horse_detail(
 ) -> Element {
     let Some(race) = s.race.cloned() else { return rsx! {} };
     let (mut focus, mut skill_sel, mut detail_tab) = (s.focus, s.skill_sel, s.detail_tab);
-    // The Wit subtab only for an uma whose Wit differs from the baseline's.
-    // The Wit subtab's length calculation, only for an uma whose Wit differs from the baseline's.
-    let old_wiz = base.and_then(|_| crate::ui::wit::old_wit(s, &res.input, i));
     let tab = *detail_tab.read();
     let h = &cur.horses[i];
     let b = base.map(|b| &b.horses[i]);
@@ -84,7 +81,7 @@ pub(super) fn horse_detail(
             }
             div { class: "dtabs-row",
                 div { class: "seg small dtabs",
-                    for (t, label) in [(DetailTab::Summary, "Summary"), (DetailTab::Skills, "Skills"), (DetailTab::Stamina, "Stamina"), (DetailTab::Wit, "Wit")] {
+                    for (t, label) in [(DetailTab::Summary, "Summary"), (DetailTab::Skills, "Skills"), (DetailTab::Stamina, "Stamina"), (DetailTab::Wit, "Wit"), (DetailTab::Mechanics, "Other Mechanics")] {
                         button {
                             class: if tab == t { "on" },
                             onclick: move |_| {
@@ -98,11 +95,14 @@ pub(super) fn horse_detail(
                         }
                     }
                 }
-                if let (DetailTab::Wit, Some(old)) = (tab, old_wiz) {
-                    crate::ui::wit::WitRun { i, old }
+                if tab == DetailTab::Wit {
+                    crate::ui::wit::WitRun { i }
                 }
                 if tab == DetailTab::Stamina {
                     crate::ui::stamina::StaminaRun { i }
+                }
+                if tab == DetailTab::Mechanics {
+                    crate::ui::mechanics::MechanicsRun { i }
                 }
             }
             if tab == DetailTab::Summary {
@@ -159,9 +159,11 @@ pub(super) fn horse_detail(
             }
             if tab == DetailTab::Wit {
                 {crate::ui::wit::wit_cards(h, b, diff)}
-                if let Some(old) = old_wiz {
-                    crate::ui::wit::WitOut { i, old }
-                }
+                crate::ui::wit::WitOut { i }
+            }
+            if tab == DetailTab::Mechanics {
+                {crate::ui::mechanics::mechanics_cards(h, b)}
+                crate::ui::mechanics::MechanicsOut { i }
             }
             if tab == DetailTab::Skills {
                 div { class: "olegend muted small",
