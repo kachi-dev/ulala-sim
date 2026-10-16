@@ -141,7 +141,7 @@ fn debuffs(s: S, r: &StamRes) -> Element {
                                 tr { key: "{d.owner}-{d.skill_id}", class: if open { "sel" },
                                     onclick: move |_| dsel.set(if open { None } else { Some(key) }),
                                     td { {skill_row(&skill_info(d.skill_id), None, "")} }
-                                    td { div { class: "whobox", {horse_icon(o, Some(&colors[d.owner]), "sm")} b { "{chara_name(o.chara_id)}" } } }
+                                    td { div { class: "whobox", {horse_icon(o, Some(&colors[d.owner]), "sm")} b { "{horse_name(o)}" } } }
                                     td { class: "num", "{pct(d.rate)}" }
                                     td { class: "num",
                                         div { class: "kb-t hitbar", div { class: "kb-f", style: "width: {d.hit_rate * 100.0:.2}%; background: var(--bad)" } }

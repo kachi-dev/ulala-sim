@@ -106,11 +106,10 @@ struct GainsRes {
     n: usize,
     /// Candidates asked for (fewer come back when cancelled).
     asked: usize,
-    npc: bool,
     /// Measured against no skills instead of her full skillset (Current Skills' "Blank" baseline).
     blank: bool,
-    /// NPC lobby and field size measured in (for "Improve fidelity", which re-measures one skill in the same field).
-    lobby: usize,
+    /// NPCs and field size measured in (for "Improve fidelity", which re-measures one skill in the same field).
+    npcs: NpcSetup,
     size: usize,
     /// Umas of the measured field with a low full-spurt rate (`low_spurts`).
     low_spurt: Vec<String>,
@@ -122,7 +121,6 @@ struct RankRes {
     items: Arc<Vec<UmaRank>>,
     cv: Arc<CourseView>,
     n: usize,
-    npc: bool,
     low_spurt: Vec<String>,
     /// Combinations asked for (fewer come back when cancelled).
     asked: usize,
@@ -224,15 +222,15 @@ struct S {
     g_owned: Signal<bool>,
     g_blank: Signal<bool>,
     /// Some(true) = NPC field, Some(false) = this field, None = automatic (NPCs for a one-uma field).
-    g_npc: Signal<Option<bool>>,
-    /// NPC lobby (index into `LOBBIES`), shared by Skill gains and Uma ranking.
-    npc_lobby: Signal<usize>,
+    /// The NPCs that fill empty gates (Results, Skill gains, Uma ranking); kept across races (npcs.json).
+    npcs: Signal<NpcSetup>,
+    /// The NPC setup drawer.
+    npc_open: Signal<bool>,
     /// The setup field's size: umas it takes, and what NPCs fill up to. `FIELD_MIN`, or an opened save's field size.
     field_size: Signal<usize>,
     /// Editor skill picker filters (kept between openings).
     pick_filter: Signal<skills::SkillFilter>,
     // Uma ranking tab
-    r_npc: Signal<Option<bool>>,
     r_styles: Signal<Vec<i32>>,
     r_q: Signal<String>,
     r_n: Signal<usize>,
@@ -328,11 +326,10 @@ pub fn App() -> Element {
         g_filter: use_signal(|| skills::SkillFilter { kinds: vec![Rarity::Gold], ..Default::default() }),
         g_owned: use_signal(|| false),
         g_blank: use_signal(|| false),
-        g_npc: use_signal(|| None),
-        npc_lobby: use_signal(|| 2),
+        npcs: use_signal(load_npcs),
+        npc_open: use_signal(|| false),
         field_size: use_signal(|| FIELD_MIN),
         pick_filter: use_signal(Default::default),
-        r_npc: use_signal(|| None),
         r_styles: use_signal(|| vec![1, 2, 3, 4]),
         r_q: use_signal(String::new),
         r_n: use_signal(|| 100),
@@ -375,6 +372,13 @@ pub fn App() -> Element {
         let Some(race) = race.as_ref() else { return };
         save_session(race.path.as_deref(), &s.input.read(), &s.trainers.read(), s.baseline.read().as_deref(), *s.field_size.read());
     });
+    // NPCs and field size change the race (empty gates take NPCs): runs before it are stale.
+    use_effect(move || {
+        save_npcs(&s.npcs.read());
+        s.field_size.read();
+        let mut rev = s.rev;
+        *rev.write() += 1;
+    });
     // Ctrl+O opens the Races modal, Esc closes overlays (a page-level listener: focus may be anywhere, or nowhere).
     use_future(move || async move {
         let mut keys = document::eval(
@@ -389,6 +393,7 @@ pub fn App() -> Element {
                 s.saves_open.set(false);
                 s.picker.set(false);
                 s.editing.set(None);
+                s.npc_open.set(false);
                 s.g_sel.set(None);
                 s.r_sel.set(None);
                 s.left_open.set(false);
@@ -411,6 +416,7 @@ pub fn App() -> Element {
                 Workspace {}
             }
             setup::Drawer {}
+            setup::NpcDrawer {}
             setup::Picker {}
             SavesModal {}
             NoHorseAct {}

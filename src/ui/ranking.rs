@@ -1,5 +1,5 @@
-//! Uma ranking tab: which costume (by its unique skill) and running style is best on this course. The selected uma is
-//! the template (stats, skills, mood); each card's unique is swapped in, the style forced, aptitudes A.
+//! Uma ranking tab: which costume (by its unique skill) and running style is best on this course. A fixed test uma
+//! (`RANK_STATS`) takes the selected uma's gate and wears each card, the style forced, aptitudes A.
 
 use super::gains::gain_charts;
 use super::*;
@@ -40,13 +40,11 @@ pub fn RankingTab() -> Element {
     let s = use_context::<S>();
     let (mut r_styles, mut r_q) = (s.r_styles, s.r_q);
     let running = use_busy(s);
-    let input = s.input.read();
-    if input.horses.is_empty() {
+    let field_n = s.input.read().horses.len();
+    if field_n == 0 {
         return rsx! { section { class: "card", p { class: "muted", "Add an uma in Setup first." } } };
     }
-    let field_n = input.horses.len();
     let hi = (*s.sel.read()).min(field_n - 1);
-    drop(input);
     let styles = r_styles.cloned();
     let ql = r_q.read().to_lowercase();
     let data = s.race.read().as_ref().map(|r| r.data.clone());
@@ -57,26 +55,24 @@ pub fn RankingTab() -> Element {
         .filter(|c| ql.is_empty() || c.name.to_lowercase().contains(&ql) || c.title.to_lowercase().contains(&ql))
         .map(|c| c.card_id)
         .collect();
-    let (mode, npc, size) = mode_seg(s, s.r_npc, field_n);
+    let size = run_size(s, field_n);
     let n = *s.r_n.read();
     let combos = picked.len() * styles.len();
-    let work = combos * n * 2 * size;
+    let work = combos * n * 2 * size.unwrap_or(0);
     let eta = eta(s, work);
     let n_picked = picked.len();
     let styles_on = styles.clone();
     let start = move |_| {
         let (Some(race), Some(cv)) = (s.race.cloned(), s.cview.cloned()) else { return };
-        if combos == 0 {
-            return;
-        }
-        let (input, i) = npc_field(&race, &s.input.peek(), hi, npc, *s.npc_lobby.peek(), *s.field_size.peek());
+        let Some(size) = size.filter(|_| combos > 0) else { return };
+        let (input, i) = ranking_field(&race, &s.input.peek(), hi, &s.npcs.peek(), size);
         let (cards, styles, rev, field) = (picked.clone(), styles.clone(), *s.rev.peek(), input.horses.clone());
         let label = format!("Ranking {} umas × {} styles × {n} seeds", cards.len(), styles.len());
         let run = move |w: &Work| uma_ranking(&race, &input, i, &cards, &styles, n, w);
         measure(s, label, combos * n, work, run, move |mut s, (items, spurt)| {
             s.r_sel.set(None);
             let low_spurt = low_spurts(&field, &spurt);
-            s.r_res.set(Some(RankRes { items: Arc::new(items), cv, n, npc, low_spurt, asked: combos, rev }));
+            s.r_res.set(Some(RankRes { items: Arc::new(items), cv, n, low_spurt, asked: combos, rev }));
             reveal("ranking");
         });
     };
@@ -85,12 +81,10 @@ pub fn RankingTab() -> Element {
             div { class: "card-h",
                 h3 { "Uma ranking" }
                 span { class: "muted small",
-                    "Which uma wins on this course by her unique skill: the chosen uma's stats and skills, each costume's unique swapped in, run at each style with A aptitude, unique on vs muted."
+                    "Which uma wins on this course by her unique skill, run at each style with A aptitude, unique on vs muted."
                 }
             }
             div { class: "gsetup",
-                {who_sel(s)}
-                {mode}
                 div { class: "field",
                     span { "Styles" }
                     div { class: "seg",
@@ -117,8 +111,12 @@ pub fn RankingTab() -> Element {
                 }
             }
             div { class: "runbar",
-                button { class: "btn big", disabled: running() || combos == 0, onclick: start, "Measure {thousands(combos)} combinations" }
-                span { class: "muted", "{thousands(n_picked)} costumes × {styles_on.len()} styles · {thousands(combos * n * 2)} races, {eta}" }
+                button { class: "btn big", disabled: running() || combos == 0 || size.is_none(), onclick: start, "Measure {thousands(combos)} combinations" }
+                if size.is_none() {
+                    span { class: "warn", "{EMPTY_SLOTS}" }
+                } else {
+                    span { class: "muted", "{thousands(n_picked)} costumes × {styles_on.len()} styles · {thousands(combos * n * 2)} races, {eta}" }
+                }
                 Progress {}
             }
         }
@@ -161,7 +159,6 @@ fn RankResults() -> Element {
         section { class: "card",
             div { class: "card-h",
                 h3 { "{thousands(r.items.len())} combinations × {r.n} seeds" }
-                span { class: "chip", if r.npc { "NPCs" } else { "This field" } }
                 span { class: "muted small", "unique skill gain in lengths" }
                 div { class: "grow" }
                 div { class: "seg small",

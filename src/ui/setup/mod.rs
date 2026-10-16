@@ -4,12 +4,14 @@
 mod course;
 mod drawer;
 mod field;
+mod npcs;
 mod run;
 
 use super::*;
 use crate::charts::{Band, Bins, CourseProfile, Mark, Region};
 use course::CourseCard;
 pub use drawer::{Drawer, Picker};
+pub use npcs::NpcDrawer;
 use field::FieldCard;
 use run::RunBar;
 
@@ -51,17 +53,14 @@ pub fn RaceContext() -> Element {
     }
 }
 
-/// p10-p90 band of activation distances (at least a sliver wide) and how often it activates along it: (from m, to m,
-/// share of the busiest bin) in ~1/120-course bins, so it reads as where it starts, not how long it lasts. None when
-/// it never activated.
+/// Band of activation distances, first to last (at least a sliver wide), and how often it activates along it: (from m,
+/// to m, share of the busiest bin) in ~1/120-course bins, so it reads as where it starts, not how long it lasts. None
+/// when it never activated.
 fn span(distances: &[f32], course: f32) -> Option<(f32, f32, Bins)> {
-    let mut d: Vec<f32> = distances.iter().copied().filter(|&x| x >= 1.0).collect();
+    let mut d = distances.to_vec();
     d.sort_by(f32::total_cmp);
-    let q = |p: f32| d[((d.len() - 1) as f32 * p).round() as usize];
-    if d.is_empty() {
-        return None;
-    }
-    let (a, b) = (q(0.1), q(0.9).max(q(0.1) + course * 0.008));
+    let (&a, &last) = (d.first()?, d.last()?);
+    let b = last.max(a + course * 0.008);
     let bw = course / 120.0;
     let nb = ((b - a) / bw).ceil().max(1.0) as usize;
     let mut counts = vec![0usize; nb];
@@ -75,7 +74,7 @@ fn span(distances: &[f32], course: f32) -> Option<(f32, f32, Bins)> {
 
 /// The band of one skill (an open skill or unique), as the only region.
 fn one_region(name: &str, distances: &[f32], course: f32) -> Vec<Region> {
-    span(distances, course).map(|(a, b, bins)| (a, b, format!("{name} (p10-p90)"), "var(--accent)".to_string(), bins)).into_iter().collect()
+    span(distances, course).map(|(a, b, bins)| (a, b, name.to_string(), "var(--accent)".to_string(), bins)).into_iter().collect()
 }
 
 /// The course, pinned above the analysis tabs. Regions follow the tab: Results = the focused uma's activations pinned

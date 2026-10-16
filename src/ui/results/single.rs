@@ -66,6 +66,7 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                             tr {
                                 th { "Place" }
                                 th { "Uma" }
+                                th { "Style" }
                                 th { class: "num", "Time" }
                                 th { class: "num c-behind", "Behind" }
                                 th { class: "num", title: "✓ full spurt: on time and at max speed. ✗ (+metres late after the final-leg start, -m/s below max spurt speed)", "Last spurt" }
@@ -94,6 +95,7 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                                                 }
                                             }
                                             td { class: "who", {who(res, names, i)} }
+                                            td { {style_badge(res.input.horses[i].running_style)} }
                                             td { class: "num",
                                                 "{ft(h.finish_time)}"
                                                 if let Some(d) = d {

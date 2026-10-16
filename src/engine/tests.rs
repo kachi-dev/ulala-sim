@@ -81,26 +81,37 @@ fn custom_race() {
     w.cancel.store(true, Relaxed);
     assert!(skill_gains(&race, &race.input, 0, &cands, false, 8, &w).0.is_empty());
 
-    // NPC lobby: the measured uma at gate 5 among 8 NPCs of distinct charas; the front-heavy end has 3 Runaways.
-    let (f, i) = npc_field(&race, &new_race().input, 0, true, LOBBIES.len() - 1, FIELD_MIN);
+    // NPC lobby: the measured uma at gate 5 among 8 mob NPCs (no chara, costume or unique); the front-heavy end has 3
+    // Runaways, which only have the Runaway skill.
+    let npcs = NpcSetup::default();
+    let front = NpcSetup { counts: LOBBIES[LOBBIES.len() - 1].1, ..npcs.clone() };
+    let (f, i) = npc_field(&race, &new_race().input, 0, true, &front, FIELD_MIN);
     assert_eq!((f.horses.len(), i, f.horses[i].card_id), (FIELD_MIN, 4, 105201));
     assert_eq!(f.horses.iter().filter(|h| runaway(&race, h)).count(), 3);
-    assert_eq!(f.horses.iter().map(|h| h.chara_id).collect::<std::collections::HashSet<_>>().len(), FIELD_MIN);
+    let mobs = |v: &[HorseInput]| v.iter().filter(|h| h.mob_id != 0).map(|h| h.mob_id).collect::<std::collections::HashSet<_>>().len();
+    assert_eq!(mobs(&f.horses), FIELD_MIN - 1);
+    assert!(f.horses.iter().filter(|h| h.mob_id != 0).all(|h| h.chara_id == 0 && h.card_id == 0 && h.skills.len() == runaway(&race, h) as usize));
+    // Skillsets: on all NPCs plus their style's, each once.
+    let sets = NpcSetup { skills: vec![200331], by_style: [vec![], vec![200431, 200331], vec![], vec![], vec![]], ..npcs.clone() };
+    let (f2, _) = npc_field(&race, &new_race().input, 0, true, &sets, FIELD_MIN);
+    let ids_of = |style: i32| f2.horses.iter().find(|h| h.mob_id != 0 && h.running_style == style).map(|h| h.skills.iter().map(|k| k.skill_id).collect::<Vec<_>>());
+    assert_eq!((ids_of(1), ids_of(2)), (Some(vec![200331, 200431]), Some(vec![200331])));
     // Top-up: a 9-uma field stays as is, a 2-uma one gets 7 NPCs after it.
-    let ids = |v: &[HorseInput]| v.iter().map(|h| h.card_id).collect::<Vec<_>>();
-    assert_eq!(ids(&npc_field(&race, &f, 2, false, 2, FIELD_MIN).0.horses), ids(&f.horses));
+    let ids = |v: &[HorseInput]| v.iter().map(|h| (h.card_id, h.mob_id)).collect::<Vec<_>>();
+    assert_eq!(ids(&npc_field(&race, &f, 2, false, &npcs, FIELD_MIN).0.horses), ids(&f.horses));
     let two = RaceInput { horses: f.horses[3..5].to_vec(), ..f.clone() };
-    let (t, j) = npc_field(&race, &two, 1, false, 2, FIELD_MIN);
+    let (t, j) = npc_field(&race, &two, 1, false, &npcs, FIELD_MIN);
     assert_eq!((t.horses.len(), j, ids(&t.horses[..2])), (FIELD_MIN, 1, ids(&two.horses)));
-    // A full 18 field: 17 NPCs of distinct charas, the lobby mix repeated, the uma at the middle gate.
-    let (big, k) = npc_field(&race, &new_race().input, 0, true, 2, 18);
-    assert_eq!((big.horses.len(), k, big.horses[k].card_id), (18, 8, 105201));
-    assert_eq!(big.horses.iter().map(|h| h.chara_id).collect::<std::collections::HashSet<_>>().len(), 18);
-    assert_eq!(lobby_styles(2, 10), [1, 2, 3, 4, 1, 2, 3, 4, 1, 2]);
+    // A full 18 field: 17 distinct mob NPCs, the lobby mix repeated, the uma at the middle gate.
+    let (big, k) = npc_field(&race, &new_race().input, 0, true, &npcs, 18);
+    assert_eq!((big.horses.len(), k, big.horses[k].card_id, mobs(&big.horses)), (18, 8, 105201, 17));
+    assert_eq!(lobby_styles(LOBBIES[2].1, 10), [1, 2, 3, 4, 1, 2, 3, 4, 1, 2]);
+    assert_eq!(lobby_counts(LOBBIES[2].1, 9), [0, 3, 2, 2, 2]);
+    assert!(lobby_styles([0; 5], 3).is_empty());
     // NPCs keep a full spurt on the longest course.
     let mut long = new_race().input;
     set_course(&race, &mut long, cs_long(&race));
-    let (f, _) = npc_field(&race, &long, 0, true, 2, FIELD_MIN);
+    let (f, _) = npc_field(&race, &long, 0, true, &npcs, FIELD_MIN);
     for s in seeds(1, 4) {
         let run = run_once(&race, &RaceInput { random_seed: s, ..f.clone() });
         assert!(f.horses.iter().zip(&run.horses).all(|(h, r)| h.viewer_id != 0 || r.full_spurt), "seed {s}");
@@ -299,7 +310,7 @@ fn gains_fingerprint() {
         set_course(&race, &mut input, course);
         // Corner Adept ○, Left-Handed ○, Right-Handed ○
         input.horses[0].skills.extend([200332, 200022, 200012].map(|skill_id| SkillInput { skill_id, level: 1 }));
-        let (input, i) = npc_field(&race, &input, 0, true, 2, FIELD_MIN);
+        let (input, i) = npc_field(&race, &input, 0, true, &NpcSetup::default(), FIELD_MIN);
         let ids: Vec<i32> = all_skills(&race).iter().filter(|k| !k.is_unique()).map(|k| k.id).collect();
         let cands = can_activate(&race, &input, i, ids);
         let w = Work::default();
@@ -336,7 +347,7 @@ fn shared_run_fingerprint() {
     for course in [race.input.course_set_id, cs_long(&race)] {
         let mut input = race.input.clone();
         set_course(&race, &mut input, course);
-        let (field, i) = npc_field(&race, &input, 0, true, 2, FIELD_MIN);
+        let (field, i) = npc_field(&race, &input, 0, true, &NpcSetup::default(), FIELD_MIN);
         let ids: Vec<i32> = all_skills(&race).iter().filter(|k| !k.is_unique()).map(|k| k.id).collect();
         let able = can_activate(&race, &field, i, ids);
         // 10 owned skills that can activate here, spread over the list.

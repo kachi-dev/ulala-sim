@@ -31,7 +31,7 @@ pub fn Results() -> Element {
     let s = use_context::<S>();
     let stale = use_stale(s, move || s.res.read().as_ref().map(|r| r.rev));
     let Some(res) = s.res.cloned() else { return rsx! {} };
-    let names: Vec<String> = res.input.horses.iter().map(|h| chara_name(h.chara_id)).collect();
+    let names: Vec<String> = res.input.horses.iter().map(horse_name).collect();
     let body = match &res.kind {
         Kind::Single { cur, base } => single_view(s, &res, &names, cur, base.as_deref()),
         Kind::Batch { cur, base } => batch_view(s, &res, &names, cur, base.as_ref()),

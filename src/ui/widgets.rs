@@ -46,8 +46,26 @@ pub(super) fn uma_icon(card: i32, chara: i32, ring: Option<&str>, size: &str) ->
     }
 }
 
+/// The game's running style badge ("FRONT" .. "END"), nothing for an unknown style.
+pub(super) fn style_badge(style: i32) -> Element {
+    let rel = format!("style/{style}.png");
+    rsx! {
+        if has_icon(&rel) { img { class: "style-b", src: "/a/{rel}", alt: "{style_label(style)}" } }
+    }
+}
+
+/// `uma_icon`, or a mob (NPC) uma's face.
 pub(super) fn horse_icon(h: &HorseInput, ring: Option<&str>, size: &str) -> Element {
-    uma_icon(h.card_id, h.chara_id, ring, size)
+    let rel = format!("mob/{}.png", h.mob_id);
+    if h.chara_id != 0 || !has_icon(&rel) {
+        return uma_icon(h.card_id, h.chara_id, ring, size);
+    }
+    let style = ring.map(|c| format!("--ring: {c}")).unwrap_or_default();
+    rsx! {
+        span { class: if ring.is_some() { "av {size} ring" } else { "av {size}" }, style: "{style}", title: "{horse_name(h)}",
+            img { src: "/a/{rel}", alt: "" }
+        }
+    }
 }
 
 // ---------- teams & colours ----------
@@ -322,54 +340,41 @@ pub(super) fn who_sel(s: S) -> Element {
     }
 }
 
-/// NPCs / This field toggle (None = automatic: NPCs only for a one-uma field), plus the NPC lobby when NPCs run.
-/// Returns the element, the mode and the field size measured in.
-pub(super) fn mode_seg(s: S, mut sel: Signal<Option<bool>>, field: usize) -> (Element, bool, usize) {
-    let mut lobby = s.npc_lobby;
-    let npc = sel.read().unwrap_or(field <= 1);
+/// The size of the setup's field with `umas` umas as Skill gains and Uma ranking run it: NPCs fill the empty gates
+/// when the setup says so. None when gates would stay empty.
+pub(super) fn run_size(s: S, umas: usize) -> Option<usize> {
     let want = *s.field_size.read();
-    let size = if npc { want } else { field.max(want) };
-    let li = *lobby.read();
-    let name = LOBBIES[li.min(LOBBIES.len() - 1)].0;
-    let styles = lobby_styles(li, size - if npc { 1 } else { field });
-    let mix = (0..LOBBY_STYLES.len()).map(|k| (LOBBY_STYLES[k], styles.iter().filter(|&&x| x == k).count()));
-    let mix = mix.filter(|x| x.1 > 0).map(|(l, k)| format!("{k} {l}")).collect::<Vec<_>>().join(", ");
-    let el = rsx! {
-        div { class: "field",
-            span { "Run" }
-            div { class: "seg",
-                button { class: if npc { "on" }, onclick: move |_| sel.set(Some(true)), "NPCs" }
-                button { class: if !npc { "on" }, disabled: field <= 1, onclick: move |_| sel.set(Some(false)), "This field" }
-            }
-            if !npc && size > field {
-                small { class: "muted mode-note", "Empty slots will be filled in with NPCs" }
-            }
-        }
-        if size > field.max(1) || npc {
-            div { class: "field lobby",
-                span { "NPC lobby" }
-                input {
-                    r#type: "range",
-                    min: 0,
-                    max: LOBBIES.len() - 1,
-                    value: "{li}",
-                    oninput: move |e| lobby.set(e.value().parse().unwrap_or(2)),
-                }
-                div { class: "lobby-ends muted small", span { "Back-heavy" } span { "Front-heavy" } }
-                small { b { "{name}" } " · {mix}" }
-            }
-        }
-    };
-    (el, npc, size)
+    (s.npcs.read().fill || umas >= want).then(|| umas.max(want))
 }
 
-/// Umas of `field` under an 80% full-spurt rate in a measurement: "Name 62%", NPCs "Name (NPC Front) 62%".
+/// Why a measurement can't run with `run_size` None.
+pub(super) const EMPTY_SLOTS: &str = "Cannot sim with empty slots - either add umas or enable NPC umas";
+
+/// NPC `j` (`lobby_styles` order) and its `LOBBY_STYLES` index, for the first `n` of `npcs`.
+pub(super) fn npc_slots(npcs: &NpcSetup, n: usize) -> impl Iterator<Item = (i32, usize)> {
+    MOBS.into_iter().zip(lobby_styles(npcs.counts, n))
+}
+
+/// Faces of the first `n` NPCs, of style `only` (`usize::MAX` = all).
+pub(super) fn npc_faces(npcs: &NpcSetup, n: usize, only: usize) -> Element {
+    rsx! {
+        span { class: "mobs",
+            for (mob, _) in npc_slots(npcs, n).filter(|x| only == usize::MAX || x.1 == only) {
+                span { key: "{mob}", class: "av xs", img { src: "/a/mob/{mob}.png", alt: "" } }
+            }
+        }
+    }
+}
+
+/// Display name: the chara's, "NPC Front" for a mob uma.
+pub(super) fn horse_name(h: &HorseInput) -> String {
+    if h.chara_id == 0 && h.mob_id != 0 { format!("NPC {}", style_label(h.running_style)) } else { chara_name(h.chara_id) }
+}
+
+/// Umas of `field` under an 80% full-spurt rate in a measurement: "Name 62%", NPCs "NPC Front 62%".
 pub(super) fn low_spurts(field: &[HorseInput], rates: &[f32]) -> Vec<String> {
     let low = field.iter().zip(rates).filter(|x| *x.1 < 0.8);
-    low.map(|(h, r)| {
-        let npc = if h.viewer_id == 0 { format!(" (NPC {})", style_label(h.running_style)) } else { String::new() };
-        format!("{}{npc} {:.0}%", chara_name(h.chara_id), r * 100.0)
-    })
+    low.map(|(h, r)| format!("{} {:.0}%", horse_name(h), r * 100.0))
     .collect()
 }
 

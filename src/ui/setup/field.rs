@@ -238,12 +238,13 @@ pub(super) fn FieldCard() -> Element {
     let is_save = race.path.is_some();
     let mut fs = s.field_size;
     let cap = *fs.read();
+    let npc_fill = s.npcs.read().fill;
     rsx! {
         details { class: "card fold", open: true,
             summary { class: "card-h",
                 h3 { "Field" }
                 span { class: "muted fsize",
-                    "{n} umas"
+                    if npc_fill && cap > n { "{n} umas + {cap - n} NPCs" } else { "{n} umas" }
                     span { class: "small", "{FIELD_MIN}" }
                     div { class: "fs-slider", style: "--f: {(cap - FIELD_MIN) as f32 / (MAX_FIELD - FIELD_MIN) as f32}",
                         div { class: "fs-ticks",
@@ -304,6 +305,7 @@ pub(super) fn FieldCard() -> Element {
                     }
                 }
             }
+            {npcs::npc_block(s, cap.saturating_sub(n))}
             div { class: if compact { "umas compact" } else { "umas" },
                 {rows}
                 if n < cap {

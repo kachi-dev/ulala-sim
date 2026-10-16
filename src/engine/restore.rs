@@ -1,12 +1,13 @@
 //! What survives a restart, in `%LOCALAPPDATA%/ulala/`: the window bounds (window.json) and the race being worked on
-//! (session.json): its save (None = custom), the setup, field size, trainer names and the pinned baseline.
+//! (session.json): its save (None = custom), the setup, field size, trainer names and the pinned baseline; the NPC
+//! setup (npcs.json).
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use uma_race_sim::api::{HorseInput, RaceInput, SkillInput};
 
-use super::{Race, app_dir, load_race, new_race};
+use super::{NpcSetup, Race, app_dir, load_race, new_race};
 
 /// Window bounds in logical px: the normal (not maximized or minimized) size and top-left, which it restores to.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -27,6 +28,15 @@ pub fn load_window() -> Option<WindowSize> {
 
 pub fn save_window(w: &WindowSize) {
     write("window.json", w);
+}
+
+/// The NPC setup (npcs.json): kept across races, not part of one.
+pub fn load_npcs() -> NpcSetup {
+    read("npcs.json").unwrap_or_default()
+}
+
+pub fn save_npcs(n: &NpcSetup) {
+    write("npcs.json", n);
 }
 
 /// The last session's race, setup and baseline.

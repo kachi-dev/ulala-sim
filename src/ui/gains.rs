@@ -23,7 +23,7 @@ const ACCURACY_N: usize = 2000;
 /// in the same field and swaps it in.
 fn improve_accuracy(s: S, id: i32) {
     let (Some(race), Some(r)) = (s.race.cloned(), s.g_res.cloned()) else { return };
-    let (mut input, i) = npc_field(&race, &s.input.peek(), r.horse, r.npc, r.lobby, r.size);
+    let (mut input, i) = npc_field(&race, &s.input.peek(), r.horse, false, &r.npcs, r.size);
     input.random_seed = random_seed();
     let work = ACCURACY_N * 2 * input.horses.len();
     let label = format!("Measuring {} × {} seeds", skill_info(id).name, thousands(ACCURACY_N));
@@ -95,18 +95,16 @@ pub fn GainsTab() -> Element {
         never = n - ok.len();
         ok
     };
-    let (mode, npc, size) = mode_seg(s, s.g_npc, field_n);
+    let size = run_size(s, field_n);
     let n_c = cands.len();
     let races = n_c * n * 2;
-    let work = races * size;
+    let work = races * size.unwrap_or(field_n);
     let eta = eta(s, work);
     let start = move |_| {
         let (Some(race), Some(cv)) = (s.race.cloned(), s.cview.cloned()) else { return };
-        if cands.is_empty() {
-            return;
-        }
-        let (lobby, size) = (*s.npc_lobby.peek(), *s.field_size.peek());
-        let (input, i) = npc_field(&race, &s.input.peek(), hi, npc, lobby, size);
+        let Some(size) = size.filter(|_| !cands.is_empty()) else { return };
+        let npcs = s.npcs.cloned();
+        let (input, i) = npc_field(&race, &s.input.peek(), hi, false, &npcs, size);
         let (cands, rev, field) = (cands.clone(), *s.rev.peek(), input.horses.clone());
         let (card, chara, asked) = (horse.card_id, horse.chara_id, cands.len());
         let label = format!("Measuring {} skills × {n} seeds", thousands(asked));
@@ -114,7 +112,7 @@ pub fn GainsTab() -> Element {
         measure(s, label, asked * n, work, run, move |mut s, (items, spurt)| {
             s.g_sel.set(None);
             let low_spurt = low_spurts(&field, &spurt);
-            s.g_res.set(Some(GainsRes { horse: hi, card, chara, items: Arc::new(items), cv, n, asked, npc, blank, lobby, size, low_spurt, rev }));
+            s.g_res.set(Some(GainsRes { horse: hi, card, chara, items: Arc::new(items), cv, n, asked, blank, npcs, size, low_spurt, rev }));
             reveal("gains");
         });
     };
@@ -125,7 +123,6 @@ pub fn GainsTab() -> Element {
             }
             div { class: "gsetup",
                 {who_sel(s)}
-                {mode}
                 label { class: "field",
                     span { "Samples" }
                     {seeds_input("gn", s.g_n, 10, 5000)}
@@ -172,11 +169,15 @@ pub fn GainsTab() -> Element {
                 }
             }
             div { class: "runbar",
-                button { class: "btn big", disabled: running() || n_c == 0, onclick: start, "Measure {thousands(n_c)} skills" }
-                span { class: "muted",
-                    "{thousands(n_c)} skills match"
-                    if never > 0 { " ({thousands(never)} more can't activate on this course or style)" }
-                    " · {thousands(races)} races, {eta}"
+                button { class: "btn big", disabled: running() || n_c == 0 || size.is_none(), onclick: start, "Measure {thousands(n_c)} skills" }
+                if size.is_none() {
+                    span { class: "warn", "{EMPTY_SLOTS}" }
+                } else {
+                    span { class: "muted",
+                        "{thousands(n_c)} skills match"
+                        if never > 0 { " ({thousands(never)} more can't activate on this course or style)" }
+                        " · {thousands(races)} races, {eta}"
+                    }
                 }
                 Progress {}
             }
@@ -311,7 +312,6 @@ fn GainsResults() -> Element {
             div { class: "card-h",
                 {uma_icon(r.card, r.chara, None, "md")}
                 h3 { "{chara_name(r.chara)}: {thousands(r.items.len())} skills × {r.n} seeds" }
-                span { class: "chip", if r.npc { "NPCs" } else { "This field" } }
                 if r.blank { span { class: "chip", "vs no skills" } }
                 span { class: "muted", "lengths gained (1 length = 2.5 m)" }
             }

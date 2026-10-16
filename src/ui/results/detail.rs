@@ -238,7 +238,7 @@ pub(super) fn UmaPick(i: usize) -> Element {
             {horse_icon(h, Some(&res.colors[j]), size)}
             div { class: "upick-who",
                 div {
-                    b { "{chara_name(h.chara_id)}" }
+                    b { "{horse_name(h)}" }
                     span { class: "gate", "#{rank}" }
                     {team_tags(&res.input, res.player, j)}
                 }
@@ -306,6 +306,10 @@ fn outcome_bar(o: &[f32; 4]) -> Element {
 #[component]
 pub(super) fn UmaLinks(i: usize, card: i32) -> Element {
     let s = use_context::<S>();
+    // NPCs aren't in the setup.
+    if card == 0 {
+        return rsx! {};
+    }
     let (mut sel, mut g_owned, mut editing) = (s.sel, s.g_owned, s.editing);
     let at = {
         let field = &s.input.read().horses;

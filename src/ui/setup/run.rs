@@ -7,11 +7,18 @@ fn run(s: S, n: Option<usize>) {
     if !claim(s) {
         return;
     }
-    let input = Arc::new(s.input.cloned());
-    let trainers = Arc::new(s.trainers.cloned());
-    let player = player_now(&race, &input);
+    // Empty gates up to the field size take NPCs (the same ones in the baseline run).
+    let (npcs, size) = (s.npcs.cloned(), *s.field_size.peek());
+    let fill = |inp: &RaceInput| if npcs.fill { npc_field(&race, inp, 0, false, &npcs, size).0 } else { inp.clone() };
+    let setup = s.input.cloned();
+    let base = s.baseline.cloned().filter(|b| has_edits(Some(b), &setup)).map(|b| Arc::new(fill(&b)));
+    let input = Arc::new(fill(&setup));
+    let mut trainers = s.trainers.cloned();
+    trainers.resize(input.horses.len(), String::new());
+    let trainers = Arc::new(trainers);
+    // NPCs come after the umas: the player keeps her gate.
+    let player = player_now(&race, &setup);
     let colors = Arc::new(uma_colors(&input, player));
-    let base = s.baseline.cloned().filter(|b| has_edits(Some(b), &input));
     let ed_mask = edited_mask(base.as_deref(), &input);
     let rev = *s.rev.peek();
     bg(s, async move {

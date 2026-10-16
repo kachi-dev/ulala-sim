@@ -512,7 +512,7 @@ pub fn Drawer() -> Element {
         }
         // Outside the drawer: its slide-in transform would make a fixed modal relative to it.
         if picking() {
-            skills::SkillPicker { i, open: picking }
+            skills::SkillPicker { to: skills::PickFor::Uma(i), open: picking }
         }
     }
 }

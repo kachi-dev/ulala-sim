@@ -70,6 +70,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                     thead {
                         tr {
                             th { "Uma" }
+                            th { "Style" }
                             th { class: "num", "Win" }
                             th { class: "num", "Avg place" }
                             th { class: "c-hist", "Places 1 to {n}" }
@@ -90,6 +91,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                                         class: if f == Some(i) { "sel" },
                                         onclick: move |_| if f == Some(i) { focus.set(None) } else { focus_gate(s, i, card) },
                                         td { class: "who", {who(res, names, i)} }
+                                        td { {style_badge(res.input.horses[i].running_style)} }
                                         td { class: "num",
                                             b { "{pct(h.win_rate)}" }
                                             if let Some(d) = d {

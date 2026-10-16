@@ -112,23 +112,47 @@ pub fn SkillFilters(mut filter: Signal<SkillFilter>, #[props(default)] fixed_cou
 /// Max skills listed at once in the picker (filters narrow it).
 const PICK_CAP: usize = 240;
 
-/// Skill picker modal for horse `i`: filters, result count, grid of skills; click adds (stays open), owned marked.
+/// Who the skill picker adds to: field uma `i`, or an NPC skillset (None = all NPCs, Some(k) = `LOBBY_STYLES[k]`).
+#[derive(Clone, Copy, PartialEq)]
+pub enum PickFor {
+    Uma(usize),
+    Npcs(Option<usize>),
+}
+
+/// The skill ids of an NPC skillset.
+pub(super) fn npc_set(n: &mut NpcSetup, k: Option<usize>) -> &mut Vec<i32> {
+    match k {
+        None => &mut n.skills,
+        Some(k) => &mut n.by_style[k],
+    }
+}
+
+/// Skill picker modal for `to`: filters, result count, grid of skills; click adds (stays open), owned marked.
 #[component]
-pub fn SkillPicker(i: usize, mut open: Signal<bool>) -> Element {
-    let s = use_context::<S>();
+pub fn SkillPicker(to: PickFor, mut open: Signal<bool>) -> Element {
+    let mut s = use_context::<S>();
     let all = s.skills.cloned();
     let f = s.pick_filter.cloned();
-    let Some(h) = s.input.read().horses.get(i).cloned() else { return rsx! {} };
-    let hits: Vec<&SkillInfo> = all.iter().filter(|k| learnable(k, h.card_id) && matches(&f, k)).collect();
+    let (card, head, who, ids): (i32, Element, String, Vec<i32>) = match to {
+        PickFor::Uma(i) => {
+            let Some(h) = s.input.read().horses.get(i).cloned() else { return rsx! {} };
+            (h.card_id, horse_icon(&h, None, "md"), chara_name(h.chara_id), h.skills.iter().map(|k| k.skill_id).collect())
+        }
+        PickFor::Npcs(k) => {
+            let who = k.map_or("All NPCs".to_string(), |k| format!("{} NPCs", LOBBY_STYLES[k]));
+            (0, rsx! {}, who, npc_set(&mut s.npcs.cloned(), k).clone())
+        }
+    };
+    let hits: Vec<&SkillInfo> = all.iter().filter(|k| learnable(k, card) && matches(&f, k)).collect();
     let n = hits.len();
     rsx! {
         div { class: "scrim top", onclick: move |_| open.set(false) }
         div { class: "modal picker-modal",
             div { class: "drawer-h",
-                {horse_icon(&h, None, "md")}
+                {head}
                 div {
                     h3 { "Add skills" }
-                    div { class: "muted small", "{chara_name(h.chara_id)} · {h.skills.len()} skills · click to add, owned ones are marked" }
+                    div { class: "muted small", "{who} · {ids.len()} skills · click to add, owned ones are marked" }
                 }
                 button { class: "btn", onclick: move |_| open.set(false), "Done" }
             }
@@ -139,7 +163,7 @@ pub fn SkillPicker(i: usize, mut open: Signal<bool>) -> Element {
             div { class: "pick-grid",
                 for k in hits.into_iter().take(PICK_CAP) {
                     {
-                        let owned = h.skills.iter().any(|x| x.skill_id == k.id);
+                        let owned = ids.contains(&k.id);
                         let new = learned(k);
                         rsx! {
                             button {
@@ -147,7 +171,10 @@ pub fn SkillPicker(i: usize, mut open: Signal<bool>) -> Element {
                                 class: if owned { "pick-card owned" } else { "pick-card" },
                                 disabled: owned,
                                 title: "{k.description}",
-                                onclick: move |_| add_skill(s, i, new),
+                                onclick: move |_| match to {
+                                    PickFor::Uma(i) => add_skill(s, i, new),
+                                    PickFor::Npcs(k) => npc_set(&mut s.npcs.write(), k).push(new.skill_id),
+                                },
                                 {skill_row(k, None, "")}
                                 div { class: "pick-desc", "{k.description}" }
                                 div { class: "pick-meta",

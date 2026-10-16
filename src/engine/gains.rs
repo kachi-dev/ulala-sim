@@ -1,14 +1,15 @@
+use serde::{Deserialize, Serialize};
 use uma_race_sim::api::{HorseInput, RaceInput, SkillInput};
 
-use super::{Dist, GRADE_A, MAX_STAMINA, Race, Run, STYLES, Work, ability_type, cards, course_info, custom_popularity, default_level, dist, distance_type, gap_lengths, names, new_horse, par_map, resume, run_forking, run_once, seeds, set_card, sim_input};
+use super::{Dist, GRADE_A, MAX_STAMINA, Race, Run, STYLES, Work, ability_type, course_info, custom_popularity, default_level, dist, distance_type, gap_lengths, names, par_map, resume, run_forking, run_once, seeds, set_card, sim_input};
 
 /// Default NPC field size (a Champions Meeting field): the measured uma and 8 NPCs.
 pub const FIELD_MIN: usize = 9;
 
-/// The styles `LOBBIES` counts, in order: Runaway, then the running styles.
+/// The styles `NpcSetup::counts` counts, in order: Runaway, then the running styles.
 pub const LOBBY_STYLES: [&str; 5] = ["Runaway", STYLES[0], STYLES[1], STYLES[2], STYLES[3]];
 
-/// NPC lobbies, back-heavy to front-heavy: name and `LOBBY_STYLES` counts of the 8 NPCs.
+/// NPC lobby presets, back-heavy to front-heavy: name and `LOBBY_STYLES` counts of 8 NPCs.
 pub const LOBBIES: [(&str, [usize; 5]); 8] = [
     ("Back-heavy", [0, 1, 1, 2, 4]),
     ("Leaning back", [0, 1, 2, 2, 3]),
@@ -20,11 +21,40 @@ pub const LOBBIES: [(&str, [usize; 5]); 8] = [
     ("3 Runaways", [3, 2, 2, 1, 0]),
 ];
 
-/// The `LOBBY_STYLES` index of each of `n` NPCs: `LOBBIES[lobby]`'s counts round-robin (a top-up takes the first few,
-/// so it stays mixed), starting over past 8.
-pub fn lobby_styles(lobby: usize, n: usize) -> Vec<usize> {
-    let mix = LOBBIES[lobby.min(LOBBIES.len() - 1)].1;
+/// The game's mob (NPC) umas NPCs are, one per NPC of a full field: mob_data's first ones (icons in assets/icons/mob,
+/// from tools/extract_icons.py).
+pub const MOBS: [i32; 17] = [8000, 8001, 8002, 8003, 8004, 8005, 8006, 8007, 8008, 8009, 8010, 8011, 8012, 8013, 8014, 8015, 8016];
+
+/// The NPCs that fill a field's empty gates: game mob umas with these stats and skills, no unique.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NpcSetup {
+    /// The race's empty gates (Results, Skill gains' "This field") get NPCs.
+    pub fill: bool,
+    /// The style mix, `LOBBY_STYLES` counts; repeated or cut to the NPCs needed (`lobby_styles`).
+    pub counts: [usize; 5],
+    /// Speed, Stamina, Power, Guts, Wit. Stamina defaults to the cap (raw 2800, 2000 after the halving) so they keep a
+    /// full spurt.
+    pub stats: [i32; 5],
+    /// Skill ids every NPC has.
+    pub skills: Vec<i32>,
+    /// Skill ids per `LOBBY_STYLES`, on top of `skills` (Runaways also get the Runaway skill).
+    pub by_style: [Vec<i32>; 5],
+}
+
+impl Default for NpcSetup {
+    fn default() -> Self {
+        NpcSetup { fill: true, counts: LOBBIES[2].1, stats: [1200, MAX_STAMINA, 1000, 600, 1000], skills: vec![], by_style: Default::default() }
+    }
+}
+
+/// The `LOBBY_STYLES` index of each of `n` NPCs: `mix`'s counts round-robin (a top-up takes the first few, so it
+/// stays mixed), starting over past its total. Empty for an empty mix.
+pub fn lobby_styles(mix: [usize; 5], n: usize) -> Vec<usize> {
     let (mut out, mut left) = (Vec::new(), mix);
+    if mix.iter().sum::<usize>() == 0 {
+        return out;
+    }
     while out.len() < n {
         if left.iter().all(|&k| k == 0) {
             left = mix;
@@ -39,42 +69,56 @@ pub fn lobby_styles(lobby: usize, n: usize) -> Vec<usize> {
     out
 }
 
+/// NPCs per `LOBBY_STYLES` among `n` (`lobby_styles` counted).
+pub fn lobby_counts(mix: [usize; 5], n: usize) -> [usize; 5] {
+    let mut c = [0; 5];
+    for k in lobby_styles(mix, n) {
+        c[k] += 1;
+    }
+    c
+}
+
 /// The field to measure in, and the measured uma's index in it. `alone`: `input.horses[horse]` at the middle gate
-/// among `size - 1` NPCs; else `input`'s field with NPCs after it up to `size`. NPCs: `lobby_styles`, each a costume of that default style and an unused chara, `new_horse`
-/// stats and unique, stamina at the cap (raw 2800, 2000 after the halving) so they keep a full spurt, A aptitude for
-/// style, distance and surface. Popularity is re-ranked when NPCs were added.
-pub fn npc_field(race: &Race, input: &RaceInput, horse: usize, alone: bool, lobby: usize, size: usize) -> (RaceInput, usize) {
+/// among `size - 1` NPCs; else `input`'s field with NPCs after it up to `size`. NPCs: `lobby_styles` of
+/// `setup.counts`, each a different `MOBS` uma (`npc`). Popularity is re-ranked when NPCs were added.
+pub fn npc_field(race: &Race, input: &RaceInput, horse: usize, alone: bool, setup: &NpcSetup, size: usize) -> (RaceInput, usize) {
     let mut out = input.clone();
     let field = if alone { vec![out.horses.swap_remove(horse)] } else { std::mem::take(&mut out.horses) };
     let n_npc = if alone { size.saturating_sub(1) } else { size.saturating_sub(field.len()) };
     let c = course_info(&race.data, input.course_set_id);
     let dt = distance_type(c.distance);
-    let runaway = race.data.skills.keys().copied().filter(|&id| sets_style(race, id)).min();
-    let mut used: Vec<i32> = field.iter().map(|h| h.chara_id).collect();
-    let mut made = Vec::new();
-    for k in lobby_styles(lobby, n_npc) {
-        let style = k.max(1) as i32; // Runaway runs Front
-        let card = cards().iter().find(|x| {
-            names().card.get(&x.card_id).is_some_and(|n| n.running_style == style) && !used.contains(&x.chara_id) && race.data.skills.contains_key(&x.unique_skill)
-        });
-        let Some(card) = card else { continue };
-        used.push(card.chara_id);
-        let mut h = new_horse(race, card.card_id);
-        h.running_style = style;
-        h.proper_running_style[style as usize - 1] = GRADE_A;
-        h.proper_distance[dt] = GRADE_A;
-        h.proper_ground[(c.surface - 1).clamp(0, 1) as usize] = GRADE_A;
-        h.stamina = MAX_STAMINA;
-        if let (0, Some(id)) = (k, runaway) {
-            h.skills.push(SkillInput { skill_id: id, level: 1 });
-        }
-        h.viewer_id = 0;
-        made.push(h);
-    }
+    let made: Vec<HorseInput> = lobby_styles(setup.counts, n_npc).into_iter().zip(MOBS).map(|(k, mob)| npc(race, setup, k, mob, dt, c.surface)).collect();
     let i = if alone { made.len() / 2 } else { horse };
     let added = !made.is_empty();
     out.horses = if alone { [&made[..i], &field[..], &made[i..]].concat() } else { [field, made].concat() };
     (if added { custom_popularity(&out) } else { out }, i)
+}
+
+/// One NPC: mob uma `mob` running `LOBBY_STYLES[k]` (Runaway = Front with the Runaway skill) with `setup`'s stats and
+/// skills, A aptitude for the style, distance (`dt`) and surface, Great mood.
+fn npc(race: &Race, setup: &NpcSetup, k: usize, mob: i32, dt: usize, surface: i32) -> HorseInput {
+    let style = k.max(1) as i32;
+    let runaway = race.data.skills.keys().copied().filter(|&id| sets_style(race, id)).min().filter(|_| k == 0);
+    let mut ids: Vec<i32> = setup.skills.iter().chain(&setup.by_style[k]).copied().chain(runaway).filter(|id| race.data.skills.contains_key(id)).collect();
+    ids.sort();
+    ids.dedup();
+    let mut h = HorseInput {
+        mob_id: mob,
+        running_style: style,
+        motivation: 5,
+        speed: setup.stats[0],
+        stamina: setup.stats[1],
+        pow: setup.stats[2],
+        guts: setup.stats[3],
+        wiz: setup.stats[4],
+        skills: ids.iter().map(|&id| SkillInput { skill_id: id, level: default_level(race, id) }).collect(),
+        popularity: 1,
+        ..Default::default()
+    };
+    h.proper_running_style[style as usize - 1] = GRADE_A;
+    h.proper_distance[dt] = GRADE_A;
+    h.proper_ground[(surface - 1).clamp(0, 1) as usize] = GRADE_A;
+    h
 }
 
 /// Skill gain (umalator-style) of one candidate skill for one horse.
@@ -282,6 +326,19 @@ pub struct UmaRank {
     pub distances: Vec<f32>,
     /// (first activation distance, gain) of each seed it activated on.
     pub by_distance: Vec<(f32, f32)>,
+}
+
+/// Uma ranking's test uma: Speed, Stamina, Power, Guts, Wit.
+pub const RANK_STATS: [i32; 5] = [1600, 2800, 1200, 600, 1200];
+
+/// Uma ranking's field: `input`'s, `input.horses[horse]` replaced by a test uma with `RANK_STATS`, no skills and Great
+/// mood, then NPCs up to `size` (`npc_field`). `uma_ranking` dresses the test uma in each card.
+pub fn ranking_field(race: &Race, input: &RaceInput, horse: usize, setup: &NpcSetup, size: usize) -> (RaceInput, usize) {
+    let [speed, stamina, pow, guts, wiz] = RANK_STATS;
+    let mut inp = input.clone();
+    let popularity = inp.horses[horse].popularity;
+    inp.horses[horse] = HorseInput { motivation: 5, speed, stamina, pow, guts, wiz, popularity, ..Default::default() };
+    npc_field(race, &inp, horse, false, setup, size)
 }
 
 /// Best uma on this course by unique skill: for each (card, style), `input.horses[horse]` wearing that card (stats,
