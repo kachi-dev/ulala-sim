@@ -125,7 +125,7 @@ fn sync_data(dir: &Path) -> Result<(), String> {
     let syncing = |f: &str| todo.iter().any(|t| t.0 == f);
     let names_file = dir.join("names.json");
     let master_file = dir.join("master_sim.db");
-    let old_names = syncing("names.json").then(|| read_names(&names_file)).flatten();
+    let old_names = (syncing("names.json") || syncing("cm_upcoming.json")).then(|| read_names(&names_file)).flatten();
     let old_master = syncing("master_sim.db").then(|| Master::load(&master_file).ok()).flatten();
     let fetch = |path: &str, sha: &str| -> Result<(), String> {
         let url = format!("https://raw.githubusercontent.com/{DATA_REPO}/{DATA_BRANCH}/data/{path}");
@@ -164,7 +164,10 @@ fn data_changes(old_names: Option<&Names>, old: Option<&Master>, names: &Names, 
             out.push(format!("New uma: {} {}", c.title, names.chara.get(&c.chara_id).map_or("", |n| n.as_str())));
         }
         out.extend(sorted(names.skill.keys().filter(|id| !o.skill.contains_key(id)).copied().collect()).iter().filter_map(skill_name).map(|n| format!("New skill: {n}")));
-        out.extend(names.cm.iter().rev().filter(|c| !o.cm.iter().any(|p| p.id == c.id)).map(|c| format!("New Champions Meeting: {} (starts {})", c.name, c.start)));
+        out.extend(names.cm.iter().rev().filter(|c| !o.cm.iter().any(|p| p.id == c.id)).map(|c| match &c.start {
+            Some(d) => format!("New Champions Meeting: {} (starts {d})", c.name),
+            None => format!("New Champions Meeting: {} (upcoming)", c.name),
+        }));
     }
     if let (Some(old), Some(new)) = (old, new) {
         for id in sorted(new.skill_data.keys().copied().collect()) {
@@ -194,8 +197,14 @@ fn data_changes(old_names: Option<&Names>, old: Option<&Master>, names: &Names, 
     out
 }
 
+/// names.json, plus the upcoming CMs written by hand beside it (`cm_upcoming.json`, undated) that it doesn't have yet.
 fn read_names(path: &Path) -> Option<Names> {
-    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+    let mut n: Names = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let up: Vec<CmPreset> = std::fs::read(path.with_file_name("cm_upcoming.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let up: Vec<CmPreset> = up.into_iter().filter(|u| !n.cm.iter().any(|p| p.id == u.id)).collect();
+    n.cm.extend(up);
+    n.cm.sort_by(|a, b| b.id.cmp(&a.id));
+    Some(n)
 }
 
 /// Git's blob hash of `bytes` (what the GitHub tree lists as `sha`).
@@ -244,8 +253,8 @@ pub struct CmPreset {
     /// CM number (champions_schedule id).
     pub id: i32,
     pub name: String,
-    /// Start date, "YYYY-MM-DD".
-    pub start: String,
+    /// Start date, "YYYY-MM-DD"; None for an upcoming CM not in the game data yet (`cm_upcoming.json`).
+    pub start: Option<String>,
     pub course_set_id: i32,
     pub race_instance_id: i32,
     pub ground: i32,
@@ -254,7 +263,7 @@ pub struct CmPreset {
     pub time: i32,
 }
 
-/// Champions Meetings, newest first.
+/// Champions Meetings, newest first (upcoming ones included).
 pub fn cm_presets() -> &'static [CmPreset] {
     &names().cm
 }
@@ -265,9 +274,9 @@ pub fn cm_conditions(p: &CmPreset) -> String {
 }
 
 /// The CM a Champions Meeting save is from: the latest one on its course that started by `date` ("YYYY-MM-DD"), which
-/// tells repeat cups (same course) apart.
+/// tells repeat cups (same course) apart. Upcoming CMs have no date, so saves wait for the game data's row.
 pub fn cm_of_save(course_set_id: i32, date: &str) -> Option<&'static CmPreset> {
-    cm_presets().iter().find(|p| p.course_set_id == course_set_id && p.start.as_str() <= date)
+    cm_presets().iter().find(|p| p.course_set_id == course_set_id && p.start.as_deref().is_some_and(|s| s <= date))
 }
 
 /// Index into `cm_presets` of the CM whose course and conditions `input` has.
@@ -334,7 +343,7 @@ fn data_update_lines() {
     let new = names(
         &format!(r#"{card},"100102":["[Ravenous Wolf]",1001,0,1,0,0,0,0,0,0,0,0,0,0]"#),
         r#""200001":["Swift","",1],"200002":["Free from the Ashes","",1],"100001":["Wolf","",1],"900001":["Wolf","",1]"#,
-        &format!(r#"[2,"Libra Cup","2026-10-20",0,0,0,0,0,0],{cm}"#),
+        &format!(r#"[3,"Scorpio Cup",null,0,0,0,0,0,0],[2,"Libra Cup","2026-10-20",0,0,0,0,0,0],{cm}"#),
     );
     let (mut a, mut b) = (Master::default(), Master::default());
     for id in [200001, 100001, 900001] {
@@ -350,8 +359,22 @@ fn data_update_lines() {
     assert_eq!(
         data_changes(Some(&old), Some(&a), &new, Some(&b)),
         ["New uma: [Ravenous Wolf] Narita Brian", "New skill: Wolf", "New skill: Free from the Ashes",
-            "New Champions Meeting: Libra Cup (starts 2026-10-20)",
+            "New Champions Meeting: Libra Cup (starts 2026-10-20)", "New Champions Meeting: Scorpio Cup (upcoming)",
             "Wolf: effects changed", "Swift: conditions changed"]
     );
     assert!(data_changes(None, None, &new, Some(&b)).is_empty());
+}
+
+#[test]
+fn upcoming_cms() {
+    let dir = std::env::temp_dir().join(format!("ulala-cm-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let names = r#"{"card":{},"chara":{},"skill":{},"race":{},"track":{},"cm":[[2,"Gemini Cup","2026-06-01",0,0,0,0,0,0],[1,"Taurus Cup","2026-05-01",0,0,0,0,0,0]]}"#;
+    std::fs::write(dir.join("names.json"), names).unwrap();
+    // CM 2 is in the game data now: its upcoming row is dropped.
+    std::fs::write(dir.join("cm_upcoming.json"), r#"[[3,"Cancer Cup",null,0,0,0,0,0,0],[2,"Old guess",null,0,0,0,0,0,0]]"#).unwrap();
+    let n = read_names(&dir.join("names.json")).unwrap();
+    let got: Vec<(i32, &str, Option<&str>)> = n.cm.iter().map(|p| (p.id, p.name.as_str(), p.start.as_deref())).collect();
+    assert_eq!(got, [(3, "Cancer Cup", None), (2, "Gemini Cup", Some("2026-06-01")), (1, "Taurus Cup", Some("2026-05-01"))]);
+    std::fs::remove_dir_all(&dir).ok();
 }

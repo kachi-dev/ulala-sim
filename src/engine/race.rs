@@ -6,7 +6,7 @@ use uma_race_sim::data::{DataEra, GameData, corpus};
 use uma_race_sim::replay::Replay;
 use uma_race_sim::sim::{defs::{RunningStyle, RunningStyleEx}, horse::running_style_ex};
 
-use super::{GROUNDS, SEASONS, SURFACES, SaveHead, TURNS, WEATHERS, course_info, cm_presets, game_data, names, pick};
+use super::{CmPreset, GROUNDS, SEASONS, SURFACES, SaveHead, TURNS, WEATHERS, course_info, cm_presets, game_data, names, pick};
 
 /// A race setup: from a saved race (`load_race`) or built by hand (`new_race`). Display strings: `race_title`,
 /// `race_subtitle`, `chara_name`; course geometry: `course_view`.
@@ -145,8 +145,10 @@ pub fn set_course(race: &Race, input: &mut RaceInput, course_set_id: i32) {
 
 /// Race instance name when `input` is a real instance on its course, else e.g. "Tokyo Turf 2400m".
 pub fn race_title(race: &Race, input: &RaceInput) -> String {
-    // A CM preset's race (rounds, not finals): just the cup's name.
-    if let Some(p) = cm_presets().iter().find(|p| p.race_instance_id == input.race_instance_id && instance_on_course(race, input)) {
+    // A CM preset's race (rounds, not finals): just the cup's name. An upcoming CM borrows an earlier CM's instance on
+    // its course, so the dated one names a shared instance (saves keep their cup's name).
+    let on = |p: &&CmPreset| p.race_instance_id == input.race_instance_id && instance_on_course(race, input);
+    if let Some(p) = cm_presets().iter().filter(on).min_by_key(|p| p.start.is_none()) {
         return p.name.clone();
     }
     let name = names().race.get(&input.race_instance_id).filter(|_| instance_on_course(race, input));

@@ -132,7 +132,7 @@ pub(super) fn CourseCard() -> Element {
                     },
                     option { value: "", selected: on_preset.is_none(), "CM preset" }
                     for (i, p) in cm_presets().iter().enumerate().filter(|(_, p)| known(p)) {
-                        option { value: "{i}", selected: on_preset == Some(i), "CM {p.id} - {p.name}" }
+                        option { value: "{i}", selected: on_preset == Some(i), "CM {p.id} - {p.name}" if p.start.is_none() { " (upcoming)" } }
                     }
                 }
             }
