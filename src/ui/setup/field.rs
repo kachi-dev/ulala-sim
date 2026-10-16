@@ -236,6 +236,7 @@ pub(super) fn FieldCard() -> Element {
                         div { class: "warn", "Poor aptitude here: {p}. Speed and skill effects are heavily reduced." }
                     }
                     div { class: "uma-stats", {stat_cells} }
+                    div { class: "muted small uma-sp", title: "Skill points the skills cost (lower tiers included)", "{h.skills.len()} skills · {thousands(skills_sp(&h.skills).max(0) as usize)} SP" }
                     {skill_list(s, i, h, b.unwrap_or(h), false)}
                 }
             }

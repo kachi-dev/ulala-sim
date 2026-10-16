@@ -301,6 +301,9 @@ td.skills > .skr + .skr { margin-top: 3px; }
   display: flex; flex-direction: column; animation: slide .18s ease-out;
 }
 @keyframes slide { from { transform: translateX(30px); opacity: 0 } }
+/* Opens over the setup pane, from the left (the uma and NPC drawers). */
+.drawer.from-left { left: 0; right: auto; box-shadow: 10px 0 40px rgba(0, 0, 0, .25); animation-name: slide-l; }
+@keyframes slide-l { from { transform: translateX(-30px); opacity: 0 } }
 .drawer.wide { width: min(820px, 94vw); }
 .gdetail .cols { grid-template-columns: 1fr; margin: 10px 0; }
 .drawer-h { display: flex; align-items: center; gap: 12px; padding: 14px 18px; background: var(--surface); border-bottom: 1px solid var(--line); }
@@ -311,6 +314,9 @@ td.skills > .skr + .skr { margin-top: 3px; }
 .stats label, .two > * { display: grid; gap: 3px; font-size: 12px; font-weight: 800; color: var(--muted); }
 .stats input { width: 100%; padding: 6px; text-align: right; }
 .stats small { font-weight: 600; }
+.stat-in { position: relative; }
+.stat-in .stat-rank { position: absolute; left: 5px; top: 50%; width: 20px; height: 20px; transform: translateY(-50%); pointer-events: none; }
+.stat-in input { padding-left: 27px; }
 .stats .chg input, .two .chg select, .apt.chg select, .lvl.chg input { border-color: var(--accent); background: var(--accent-soft); }
 .stats .chg span, .two .chg > span, .apt.chg { color: var(--accent-ink); }
 .help { position: relative; display: inline-block; }
@@ -841,12 +847,18 @@ table.matrix td.never { color: var(--muted); background: repeating-linear-gradie
 .vc-h { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .vc-name { flex: 1; min-width: 0; display: grid; line-height: 1.25; }
 .vc-name b { font-size: 14px; }
+.uma-sp { margin: -2px 0 -4px; font-weight: 700; }
+h4 .sp { font-weight: 700; text-transform: none; letter-spacing: 0; }
+.vc-side { display: flex; align-items: center; gap: 4px; flex: none; cursor: default; }
+.vc-side .btn.icon { opacity: .45; }
+.vcard:hover .vc-side .btn.icon { opacity: 1; }
+.chip.cm { background: var(--accent-soft); color: var(--accent-ink); }
 .vc-rank { width: 38px; height: 38px; flex: none; }
 .vc-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
 .vc-stats div { display: grid; grid-template-columns: auto auto; align-items: center; justify-content: center; background: var(--surface); border-radius: 7px; padding: 2px 1px; min-width: 0; }
 .vc-si { grid-column: 1 / -1; justify-self: center; width: 19px; height: 19px; opacity: .85; }
 :root[data-theme=light] .vc-si { filter: invert(.75); }
-.vc-sr { width: 22px; height: 22px; margin: 0 -1px; }
+.vc-sr { width: 16px; height: 16px; margin: 0 1px 0 0; }
 .vc-stats b { font-size: 12.5px; letter-spacing: -.02em; }
 .vc-apts { display: grid; gap: 3px; }
 .vc-apt-row { display: flex; gap: 3px; }

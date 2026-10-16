@@ -1,6 +1,6 @@
 //! What survives a restart, in `%LOCALAPPDATA%/ulala/`: the window bounds (window.json) and the race being worked on
 //! (session.json): its save (None = custom), the setup, field size, trainer names and the pinned baseline; the NPC
-//! setup (npcs.json); setups saved by name (setups/<name>.json).
+//! setup (npcs.json); races and umas saved by name (setups/<name>.json, umas/<name>.json).
 
 use std::path::{Path, PathBuf};
 
@@ -136,11 +136,102 @@ pub fn setups_dir() -> Option<PathBuf> {
     Some(app_dir()?.join("setups"))
 }
 
-/// The file a setup named `name` saves to (characters Windows rejects in file names become '_').
+/// The file a setup named `name` saves to.
 pub fn setup_path(name: &str) -> Option<PathBuf> {
+    named_file(setups_dir()?, name)
+}
+
+/// `dir/<name>.json` (characters Windows rejects in file names become '_'); None for a blank name.
+fn named_file(dir: PathBuf, name: &str) -> Option<PathBuf> {
     let stem: String = name.trim().chars().map(|c| if c.is_control() || r#"<>:"/\|?*"#.contains(c) { '_' } else { c }).take(80).collect();
     let stem = stem.trim_end_matches(['.', ' ']);
-    (!stem.is_empty()).then(|| setups_dir()).flatten().map(|d| d.join(format!("{stem}.json")))
+    (!stem.is_empty()).then(|| dir.join(format!("{stem}.json")))
+}
+
+/// Seconds since 1970 of `path`'s last write (0 when unknown).
+fn mtime_of(path: &Path) -> u64 {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs())
+}
+
+/// An uma saved by name (`umas/<name>.json`): stats, aptitudes, style, mood, skills and trainer name.
+#[derive(Clone, Debug)]
+pub struct SavedUma {
+    pub path: PathBuf,
+    pub name: String,
+    pub horse: HorseInput,
+    pub trainer: String,
+    /// The Champions Meeting it was made for (number, name), when tagged.
+    pub cm: Option<(i32, String)>,
+    /// `uma_hash` of `horse`: the same in another saved uma = an exact duplicate.
+    pub hash: String,
+    /// When the file was last written, "YYYY-MM-DD" (UTC), and its seconds since 1970.
+    pub date: String,
+    pub mtime: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct UmaFile {
+    /// Format version; tells an uma file from other JSON.
+    ulala_uma: u32,
+    name: String,
+    horse: Horse,
+    #[serde(default)]
+    trainer: String,
+    #[serde(default)]
+    cm: Option<(i32, String)>,
+}
+
+/// Where umas saved by name live.
+pub fn umas_dir() -> Option<PathBuf> {
+    Some(app_dir()?.join("umas"))
+}
+
+/// The file uma `horse` saves to as `name`: `<name>-<uma_hash>.json`, so the same name can hold different umas (two of
+/// one uma with different stats) and only an exact copy lands on the same file.
+pub fn uma_path(name: &str, horse: &HorseInput) -> Option<PathBuf> {
+    named_file(umas_dir()?, name).map(|p| p.with_file_name(format!("{}-{}.json", p.file_stem().unwrap_or_default().to_string_lossy(), uma_hash(horse))))
+}
+
+/// 8 hex digits of SHA-1 over what makes an uma: costume, stats, aptitudes and skills with levels (in any order).
+/// Equal = an exact duplicate.
+pub fn uma_hash(h: &HorseInput) -> String {
+    use sha1::{Digest, Sha1};
+    let mut skills: Vec<(i32, i32)> = h.skills.iter().map(|k| (k.skill_id, k.level)).collect();
+    skills.sort_unstable();
+    let key = format!(
+        "{} {:?} {:?} {:?} {:?} {skills:?}",
+        h.card_id,
+        [h.speed, h.stamina, h.pow, h.guts, h.wiz],
+        h.proper_ground,
+        h.proper_distance,
+        h.proper_running_style
+    );
+    Sha1::digest(key.as_bytes()).iter().take(4).map(|b| format!("{b:02x}")).collect()
+}
+
+/// Writes uma `name` to `path`, replacing any file there.
+pub fn write_uma(path: &Path, name: &str, horse: &HorseInput, trainer: &str, cm: Option<(i32, String)>) -> Result<(), String> {
+    let f = UmaFile { ulala_uma: 1, name: name.trim().to_string(), horse: horse.into(), trainer: trainer.to_string(), cm };
+    if let Some(d) = path.parent() {
+        std::fs::create_dir_all(d).map_err(|e| format!("Couldn't create {}: {e}", d.display()))?;
+    }
+    std::fs::write(path, serde_json::to_vec_pretty(&f).unwrap()).map_err(|e| format!("Couldn't save {}: {e}", path.display()))
+}
+
+/// The uma in `path`, None when it isn't an uma file.
+pub fn read_uma(path: &Path) -> Option<SavedUma> {
+    let f: UmaFile = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let mtime = mtime_of(path);
+    let horse: HorseInput = f.horse.into();
+    Some(SavedUma { path: path.to_path_buf(), name: f.name, hash: uma_hash(&horse), horse, trainer: f.trainer, cm: f.cm, date: ymd(mtime), mtime })
+}
+
+/// Every uma saved by name, newest first.
+pub fn list_umas() -> Vec<SavedUma> {
+    let Some(d) = umas_dir() else { return vec![] };
+    let mut v: Vec<SavedUma> = std::fs::read_dir(d).into_iter().flatten().flatten().filter_map(|e| read_uma(&e.path())).collect();
+    v.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+    v
 }
 
 /// Writes setup `name` to `path`, replacing any file there.
@@ -173,7 +264,7 @@ pub fn write_setup(
 pub fn read_setup(path: &Path) -> Option<SavedSetup> {
     let f: SetupFile = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
     let input: RaceInput = f.session.input.into();
-    let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
+    let mtime = mtime_of(path);
     let mut trainers = f.session.trainers;
     trainers.resize(input.horses.len(), String::new());
     Some(SavedSetup {
@@ -283,6 +374,21 @@ fn setup_round_trip() {
     assert_eq!(format!("{:?}", s.baseline), format!("{:?}", Some(&s.input)));
     assert_eq!(s.cm, Some((21, "Capricorn Cup".into())));
     assert!(setup_path("a/b:c?").unwrap().ends_with("a_b_c_.json") && setup_path("  ").is_none());
+    let horse = &input.horses[0];
+    // Same name, other stats: another file; skill order doesn't matter; the hash is in the file name.
+    let mut faster = horse.clone();
+    faster.speed += 100;
+    let mut shuffled = horse.clone();
+    shuffled.skills.reverse();
+    assert_ne!(uma_hash(horse), uma_hash(&faster));
+    assert_eq!(uma_hash(horse), uma_hash(&shuffled));
+    assert!(uma_path("Ace", horse).unwrap().ends_with(format!("Ace-{}.json", uma_hash(horse))));
+    write_uma(&path, "Ace", horse, "Kachi", Some((21, "Capricorn Cup".into()))).unwrap();
+    let u = read_uma(&path).unwrap();
+    assert!(read_setup(&path).is_none());
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!((u.name.as_str(), u.trainer.as_str(), u.cm), ("Ace", "Kachi", Some((21, "Capricorn Cup".into()))));
+    assert_eq!(format!("{:?}", u.horse), format!("{horse:?}"));
 }
 
 #[cfg(test)]

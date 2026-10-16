@@ -10,8 +10,8 @@ use std::rc::Rc;
 pub fn Picker() -> Element {
     let mut s = use_context::<S>();
     let mut q = use_signal(String::new);
-    // Veterans tab, its sort and required skills (kept between openings).
-    let mut vets = use_signal(|| false);
+    // Tab (Characters, Veterans, My umas); the veterans' sort and required skills (kept between openings).
+    let mut tab = use_signal(|| 0);
     let sort = use_signal(|| 0);
     let need = use_signal(Vec::new);
     let apt_min = use_signal(|| [0; 10]);
@@ -32,24 +32,27 @@ pub fn Picker() -> Element {
     }
     rsx! {
         div { class: "scrim top", onclick: move |_| s.picker.set(false) }
-        div { class: if vets() { "modal over vets-modal" } else { "modal over" },
+        div { class: if tab() > 0 { "modal over vets-modal" } else { "modal over" },
             div { class: "drawer-h",
                 h3 { if replace.is_some() { "Change uma" } else { "Add an uma" } }
                 div { class: "seg small",
-                    button { class: if !vets() { "on" }, onclick: move |_| vets.set(false), "Characters" }
-                    button { class: if vets() { "on" }, onclick: move |_| vets.set(true), "Veterans" }
+                    for (k, label) in ["Characters", "Veterans", "My umas"].into_iter().enumerate() {
+                        button { class: if tab() == k { "on" }, onclick: move |_| tab.set(k), "{label}" }
+                    }
                 }
                 input {
                     r#type: "search",
-                    placeholder: "Search by name or costume…",
+                    placeholder: if tab() == 2 { "Search by name, uma or CM…" } else { "Search by name or costume…" },
                     autofocus: true,
                     value: "{q}",
                     oninput: move |e| q.set(e.value()),
                 }
                 button { class: "btn icon", title: "Close", onclick: move |_| s.picker.set(false), {icon("x")} }
             }
-            if vets() {
+            if tab() == 1 {
                 VeteranList { q: ql, sort, need, apt_min, mins, replace }
+            } else if tab() == 2 {
+                MyUmaList { q: ql, replace }
             } else {
             div { class: "cgroups",
                 if groups.is_empty() { p { class: "muted", "No uma matches." } }
@@ -122,7 +125,7 @@ fn VeteranList(
     mut mins: Signal<[i32; 3]>,
     replace: Option<usize>,
 ) -> Element {
-    let mut s = use_context::<S>();
+    let s = use_context::<S>();
     let list = use_hook(|| Rc::new(load_veterans()));
     let mut skill_q = use_signal(String::new);
     let mut skill_open = use_signal(|| false);
@@ -277,33 +280,14 @@ fn VeteranList(
             for v in hits {
                 {
                     let h = v.horse.clone();
-                    let st = stats(&h);
-                    let apts = vet_apts(&h);
-                    let sp = skills_sp(&h.skills);
-                    let sk: Vec<(SkillInfo, i32)> = game_order(&h.skills).into_iter().map(|(_, k)| (skill_info(k.skill_id), k.level)).collect();
                     let title = card_title(h.card_id);
                     let day = v.created.get(..10).unwrap_or(&v.created).to_string();
                     let wins = h.single_mode_win_count;
-                    let pref = (h.running_style - 1) as usize;
                     rsx! {
                         div {
                             key: "{v.id}",
                             class: "vcard",
-                            onclick: move |_| {
-                                let Some(race) = s.race.cloned() else { return };
-                                let mut h = h.clone();
-                                h.skills.retain(|k| race.data.skills.contains_key(&k.skill_id));
-                                if let Some(i) = replace {
-                                    edit_race(s, |inp| inp.horses[i] = h);
-                                    if let Some(t) = s.trainers.write().get_mut(i) {
-                                        t.clear();
-                                    }
-                                } else {
-                                    edit_race(s, |inp| inp.horses.push(h));
-                                    s.trainers.write().push(String::new());
-                                }
-                                s.picker.set(false);
-                            },
+                            onclick: move |_| place(s, h.clone(), String::new(), replace),
                             div { class: "vc-h",
                                 {uma_icon(v.horse.card_id, v.horse.chara_id, None, "md")}
                                 div { class: "vc-name",
@@ -317,6 +301,130 @@ fn VeteranList(
                                 }
                                 {rank_img(v.rank, "vc-rank")}
                             }
+                            {vc_body(&v.horse, &need_v)}
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Puts uma `h` (as trained or saved) at gate `replace`, or adds her: skills the race's data lacks are dropped.
+fn place(mut s: S, mut h: HorseInput, trainer: String, replace: Option<usize>) {
+    let Some(race) = s.race.cloned() else { return };
+    h.skills.retain(|k| race.data.skills.contains_key(&k.skill_id));
+    if let Some(i) = replace {
+        edit_race(s, |inp| inp.horses[i] = h);
+        if let Some(t) = s.trainers.write().get_mut(i) {
+            *t = trainer;
+        }
+    } else {
+        edit_race(s, |inp| inp.horses.push(h));
+        s.trainers.write().push(trainer);
+    }
+    s.picker.set(false);
+}
+
+/// Umas saved by name as cards: search by name, uma or CM, a CM filter, the race's CM's first. Click adds (or
+/// replaces) the uma as saved, trainer name included. Mounted only while shown, so every opening reads them fresh.
+#[component]
+fn MyUmaList(q: String, replace: Option<usize>) -> Element {
+    let s = use_context::<S>();
+    let mut list = use_signal(list_umas);
+    // The uma whose Delete was clicked, asking to confirm; the CM filter (0 = all).
+    let mut del = use_signal(|| None::<PathBuf>);
+    let mut cm_f = use_signal(|| 0);
+    let all = list.read();
+    if all.is_empty() {
+        return rsx! {
+            p { class: "muted vets-empty", "No saved umas yet. Save uma, in an uma's edit drawer, keeps her stats, aptitudes and skills here, tagged with the CM when the course is on one." }
+        };
+    }
+    let cur_cm = cm_preset_of(&s.input.read()).map(|k| cm_presets()[k].id);
+    let mut cms: Vec<(i32, String)> = all.iter().filter_map(|u| u.cm.clone()).collect();
+    cms.sort_by(|a, b| b.0.cmp(&a.0));
+    cms.dedup_by_key(|c| c.0);
+    let f = cm_f();
+    let text = |u: &SavedUma| {
+        let cm = u.cm.as_ref().map_or(String::new(), |(id, n)| format!("CM {id} {n}"));
+        format!("{} {} {} {cm} {}", u.name, chara_name(u.horse.chara_id), card_title(u.horse.card_id), u.trainer).to_lowercase()
+    };
+    let mut hits: Vec<&SavedUma> = all.iter().filter(|u| f == 0 || u.cm.as_ref().is_some_and(|c| c.0 == f)).filter(|u| text(u).contains(&q)).collect();
+    // The race's CM first (newest first within).
+    hits.sort_by_key(|u| cur_cm.is_none() || u.cm.as_ref().map(|c| c.0) != cur_cm);
+    rsx! {
+        if !cms.is_empty() {
+            div { class: "vet-bar",
+                label { class: "vaf",
+                    "CM"
+                    select { onchange: move |e| cm_f.set(e.value().parse().unwrap_or(0)),
+                        option { value: "0", "All" }
+                        for (id, name) in cms {
+                            option { value: "{id}", selected: f == id, "CM {id} - {name}" }
+                        }
+                    }
+                }
+            }
+        }
+        div { class: "vets",
+            if hits.is_empty() { p { class: "muted", "No saved uma matches." } }
+            for u in hits {
+                {
+                    let (h, trainer, p) = (u.horse.clone(), u.trainer.clone(), u.path.clone());
+                    let asking = del.read().as_ref() == Some(&u.path);
+                    let sub = [u.trainer.clone(), format!("saved {}", u.date)].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" · ");
+                    rsx! {
+                        div {
+                            key: "{u.path.display()}",
+                            class: "vcard",
+                            onclick: move |_| place(s, h.clone(), trainer.clone(), replace),
+                            div { class: "vc-h",
+                                {uma_icon(u.horse.card_id, u.horse.chara_id, None, "md")}
+                                div { class: "vc-name",
+                                    b { class: "ell", "{u.name}" }
+                                    div { class: "muted small ell", "{chara_name(u.horse.chara_id)} {card_title(u.horse.card_id)}" }
+                                    div { class: "muted small ell", "{sub}" }
+                                }
+                                div { class: "vc-side", onclick: move |e| e.stop_propagation(),
+                                    if let Some((id, name)) = &u.cm { span { class: "chip cm", title: "Made for CM {id} - {name}", "CM {id}" } }
+                                    if asking {
+                                        button {
+                                            class: "btn small danger",
+                                            onclick: {
+                                                let p = p.clone();
+                                                move |_| {
+                                                    let _ = std::fs::remove_file(&p);
+                                                    del.set(None);
+                                                    list.set(list_umas());
+                                                }
+                                            },
+                                            "Delete"
+                                        }
+                                        button { class: "btn small ghost", onclick: move |_| del.set(None), "Keep" }
+                                    } else {
+                                        button { class: "btn icon", title: "Delete this saved uma", onclick: move |_| del.set(Some(p.clone())), {icon("trash")} }
+                                    }
+                                }
+                            }
+                            {vc_body(&u.horse, &[])}
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A veteran or saved uma card's body: stats with their ranks, aptitudes (with SP), skills in the game's order
+/// (`need` ones marked).
+fn vc_body(h: &HorseInput, need: &[i32]) -> Element {
+    let st = stats(h);
+    let apts = vet_apts(h);
+    let sp = skills_sp(&h.skills);
+    let sk: Vec<(SkillInfo, i32)> = game_order(&h.skills).into_iter().map(|(_, k)| (skill_info(k.skill_id), k.level)).collect();
+    let pref = (h.running_style - 1) as usize;
+    rsx! {
                             div { class: "vc-stats",
                                 for k in 0..5 {
                                     div {
@@ -346,14 +454,9 @@ fn VeteranList(
                             }
                             div { class: "vc-skills",
                                 for (k, lv) in sk.iter() {
-                                    {skill_row(k, Some(*lv), if need_v.contains(&k.id) { "need" } else { "" })}
+                                    {skill_row(k, Some(*lv), if need.contains(&k.id) { "need" } else { "" })}
                                 }
                             }
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -399,7 +502,7 @@ pub fn Drawer() -> Element {
     };
     rsx! {
         div { class: "scrim", onclick: move |_| s.editing.set(None) }
-        aside { class: "drawer",
+        aside { class: "drawer from-left",
             div { class: "drawer-h",
                 {horse_icon(&h, Some(&ring), "lg")}
                 div {
@@ -407,6 +510,7 @@ pub fn Drawer() -> Element {
                     div { class: "muted small", "{card_title(h.card_id)}" }
                     div { class: "muted small", if trainer.is_empty() { "Gate {i + 1}" } else { "Gate {i + 1} · {trainer}" } }
                 }
+                button { class: "btn ghost", title: "Keep this uma (stats, aptitudes, skills) to add again from My umas", onclick: move |_| s.uma_save.set(Some(i)), "Save uma" }
                 button { class: "btn ghost", title: "Pick a different uma; stats, skills and team stay", onclick: move |_| s.picker.set(true), "Change uma" }
                 button { class: "btn icon", title: "Close", onclick: move |_| s.editing.set(None), {icon("x")} }
             }
@@ -433,18 +537,22 @@ pub fn Drawer() -> Element {
                     for k in 0..5 {
                         label { class: if hs[k] != bs[k] { "chg" },
                             span { "{STATS[k]}" }
-                            input {
-                                id: "stat-{k}",
-                                r#type: "number",
-                                min: 1,
-                                max: STAT_MAX,
-                                value: "{hs[k]}",
-                                oninput: move |e| {
-                                    if let Ok(v) = e.value().parse::<i32>() {
-                                        edit(s, i, |h| *stat_mut(h, k) = v.clamp(1, STAT_MAX));
-                                    }
-                                },
-                                onchange: move |_| resync(&format!("stat-{k}"), stats(&s.input.peek().horses[i])[k]),
+                            // The stat's rank inside the box, following the value.
+                            div { class: "stat-in",
+                                {rank_img(stat_rank(hs[k]), "stat-rank")}
+                                input {
+                                    id: "stat-{k}",
+                                    r#type: "number",
+                                    min: 1,
+                                    max: STAT_MAX,
+                                    value: "{hs[k]}",
+                                    oninput: move |e| {
+                                        if let Ok(v) = e.value().parse::<i32>() {
+                                            edit(s, i, |h| *stat_mut(h, k) = v.clamp(1, STAT_MAX));
+                                        }
+                                    },
+                                    onchange: move |_| resync(&format!("stat-{k}"), stats(&s.input.peek().horses[i])[k]),
+                                }
                             }
                             // The line is always there, so the inputs stay aligned when one changes.
                             small { if hs[k] != bs[k] { "was {bs[k]}" } else { "\u{a0}" } }
@@ -497,7 +605,7 @@ pub fn Drawer() -> Element {
                     {apt("Late", h.proper_running_style[2], b.proper_running_style[2], |h, v| h.proper_running_style[2] = v)}
                     {apt("End", h.proper_running_style[3], b.proper_running_style[3], |h, v| h.proper_running_style[3] = v)}
                 }
-                h4 { "Skills ({h.skills.len()})" }
+                h4 { "Skills ({h.skills.len()})" span { class: "muted sp", title: "Skill points the skills cost (lower tiers included)", " · {thousands(skills_sp(&h.skills).max(0) as usize)} SP" } }
                 {skill_list(s, i, &h, &b, true)}
             }
             div { class: "drawer-f",

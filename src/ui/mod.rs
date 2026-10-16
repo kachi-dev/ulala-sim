@@ -202,6 +202,8 @@ struct S {
     save_open: Signal<Option<saves::SaveMode>>,
     /// The saved race (Load race > My races) being worked on, as last saved or loaded.
     saved_race: Signal<Option<SavedSetup>>,
+    /// The Save uma dialog, for the uma at this gate.
+    uma_save: Signal<Option<usize>>,
     race: Signal<Option<Arc<Race>>>,
     skills: Signal<Arc<Vec<SkillInfo>>>,
     courses: Signal<Arc<Vec<CourseInfo>>>,
@@ -322,6 +324,7 @@ pub fn App() -> Element {
         setups: use_signal(Vec::new),
         save_open: use_signal(|| None),
         saved_race: use_signal(|| None),
+        uma_save: use_signal(|| None),
         race: use_signal(|| None),
         skills: use_signal(Default::default),
         courses: use_signal(Default::default),
@@ -416,6 +419,7 @@ pub fn App() -> Element {
                 // Esc closes whatever overlay is open.
                 s.saves_open.set(false);
                 s.save_open.set(None);
+                s.uma_save.set(None);
                 s.picker.set(false);
                 s.editing.set(None);
                 s.npc_open.set(false);
@@ -445,6 +449,7 @@ pub fn App() -> Element {
             setup::Picker {}
             SavesModal {}
             SaveSetupModal {}
+            SaveUmaModal {}
             NoHorseAct {}
             WhatsNew {}
             Toast {}

@@ -125,7 +125,7 @@ pub fn NpcDrawer() -> Element {
     };
     rsx! {
         div { class: "scrim", onclick: move |_| s.npc_open.set(false) }
-        aside { class: "drawer",
+        aside { class: "drawer from-left",
             div { class: "drawer-h",
                 div { h3 { "NPC setup" } }
                 button { class: "btn icon", title: "Close", onclick: move |_| s.npc_open.set(false), {icon("x")} }

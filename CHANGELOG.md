@@ -14,3 +14,10 @@ Shown in the app the first time a new version opens; the release workflow also p
 ## 0.2.0
 - Added 'other mechanics' tab
 - Fixed bug where changing a horse's stats/skills (thus requiring resimulation) would still use the old horse in the Skills/Stamina/Wit tab until you do a Run x1000
+
+## 0.2.1
+- Better NPC sim customization
+- Save/load races/umas
+- SP tracking
+- Show skill/velocity on course image
+- Idk probably other UI stuff I forgor

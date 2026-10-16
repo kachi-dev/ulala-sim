@@ -136,7 +136,6 @@ pub(super) fn SaveSetupModal() -> Element {
         div { class: "scrim top", onclick: move |_| s.save_open.set(None) }
         div { class: "modal notice save-setup",
             h3 { "{heading}" }
-            p { class: "muted small", "The course, conditions, seed, umas, NPCs and pinned baseline, kept under a name in Load race > My races." }
             label { class: "field",
                 span { "Name" }
                 input {
@@ -215,6 +214,92 @@ pub(super) fn RaceHeader() -> Element {
                     }
                 }
                 button { class: "btn alt", title: "Load a saved race or a replay (Ctrl+O)", onclick: move |_| open_saves(s), "Load race" }
+            }
+        }
+    }
+}
+
+/// Save uma: the uma at gate `s.uma_save` (stats, aptitudes, style, mood, skills, trainer name) under a name, listed
+/// in the uma picker's My umas; tagged with the race's CM preset unless unticked. Always a new saved uma: names can
+/// repeat.
+#[component]
+pub(super) fn SaveUmaModal() -> Element {
+    let mut s = use_context::<S>();
+    let mut name = use_signal(String::new);
+    let mut tag = use_signal(|| true);
+    // Each opening starts from the uma's name, CM tag on.
+    use_effect(move || {
+        if let Some(i) = *s.uma_save.read() {
+            name.set(s.input.peek().horses.get(i).map_or(String::new(), |h| chara_name(h.chara_id)));
+            tag.set(true);
+        }
+    });
+    let Some(i) = *s.uma_save.read() else { return rsx! {} };
+    let input = s.input.read();
+    let Some(h) = input.horses.get(i).cloned() else { return rsx! {} };
+    let trainer = s.trainers.read().get(i).cloned().unwrap_or_default();
+    let cm = cm_preset_of(&input).map(|k| (cm_presets()[k].id, cm_presets()[k].name.clone()));
+    drop(input);
+    let n = name.read().trim().to_string();
+    let ok = uma_path(&n, &h).is_some();
+    // Exact copies of her already saved (same costume, stats, aptitudes and skills).
+    let hash = uma_hash(&h);
+    let mut names: Vec<String> = list_umas().into_iter().filter(|u| u.hash == hash).map(|u| u.name).collect();
+    names.sort();
+    // "“A”, “B” ×2": each name once, with how many copies when more than one.
+    let mut dups: Vec<String> = vec![];
+    for n in names.chunk_by(|a, b| a == b) {
+        dups.push(if n.len() > 1 { format!("“{}” ×{}", n[0], n.len()) } else { format!("“{}”", n[0]) });
+    }
+    let st = stats(&h);
+    let mut save = {
+        let (h, trainer, cm) = (h.clone(), trainer.clone(), cm.clone());
+        move || {
+            let Some(path) = uma_path(&name.peek(), &h) else { return };
+            match write_uma(&path, &name.peek(), &h, &trainer, cm.clone().filter(|_| tag())) {
+                Ok(()) => s.uma_save.set(None),
+                Err(e) => s.err.set(Some(e)),
+            }
+        }
+    };
+    let mut save2 = save.clone();
+    rsx! {
+        div { class: "scrim top", onclick: move |_| s.uma_save.set(None) }
+        div { class: "modal notice save-setup",
+            h3 { "Save uma" }
+            div { class: "whobox",
+                {horse_icon(&h, None, "md")}
+                div {
+                    b { "{chara_name(h.chara_id)}" }
+                    div { class: "muted small", "{card_title(h.card_id)} · {st[0]} / {st[1]} / {st[2]} / {st[3]} / {st[4]} · {h.skills.len()} skills" }
+                }
+            }
+            label { class: "field",
+                span { "Name" }
+                input {
+                    id: "uma-name",
+                    autofocus: true,
+                    value: "{name}",
+                    oninput: move |e| name.set(e.value()),
+                    onkeydown: move |e| {
+                        if e.key() == Key::Enter && !name.peek().trim().is_empty() {
+                            save2();
+                        }
+                    },
+                }
+            }
+            if let Some((id, cname)) = &cm {
+                label { class: "check",
+                    input { r#type: "checkbox", checked: tag(), onchange: move |_| tag.toggle() }
+                    "Made for CM {id} - {cname}"
+                }
+            }
+            if !dups.is_empty() {
+                p { class: "warn", "Already saved, exactly the same: {dups.join(\", \")}." }
+            }
+            div { class: "btns",
+                button { class: "btn ghost", onclick: move |_| s.uma_save.set(None), "Cancel" }
+                button { class: "btn", disabled: !ok, onclick: move |_| save(), "Save" }
             }
         }
     }
