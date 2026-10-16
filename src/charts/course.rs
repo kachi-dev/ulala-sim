@@ -4,8 +4,31 @@ use super::*;
 pub type Bins = Vec<(f32, f32, f32)>;
 /// A `CourseProfile` region: (start m, end m, label, colour, bins).
 pub type Region = (f32, f32, String, String, Bins);
-/// A `CourseProfile` mark: (at m, label, colour).
-pub type Mark = (f32, String, String);
+/// A skill effect on `CourseProfile`: from activation to where it ended, its name in `color` underlined by a bar that
+/// long, tinted down to the speed line (or the ridge). `tip` = the hover text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkillMark {
+    pub start: f32,
+    pub end: f32,
+    pub name: String,
+    pub color: String,
+    pub tip: String,
+}
+
+/// Longest skill name on the course before "…" (the grade mark ◎/○ is kept); the hover has the full name.
+const MARK_NAME_MAX: usize = 16;
+
+fn mark_name(name: &str) -> String {
+    let (base, grade) = match name.trim_end().char_indices().last() {
+        Some((i, c)) if matches!(c, '◎' | '○') => (name[..i].trim_end(), &name[i..]),
+        _ => (name, ""),
+    };
+    if base.chars().count() <= MARK_NAME_MAX {
+        return name.to_string();
+    }
+    let cut: String = base.chars().take(MARK_NAME_MAX).collect();
+    format!("{}…{}{grade}", cut.trim_end_matches([' ', ',', ':']), if grade.is_empty() { "" } else { " " })
+}
 /// One race state of one uma along the course (e.g. rushed). `CourseProfile` draws a row each, `RaceChart` tinted
 /// regions; both with the icon.
 #[derive(Clone, Debug, PartialEq)]
@@ -350,14 +373,18 @@ pub(super) fn elevation_or_slopes(elevation: &[f32], slopes: &[(f32, f32, f32)],
 /// - `phases`: start m of Early race, Mid race, Late race, Last spurt (a leading 0 is optional).
 /// - `regions`: (start m, end m, label, colour, bins) packed into lanes above the track: a bar, or with `bins`
 ///   ((from m, to m, 0..1) along it) a little histogram of where it activates.
-/// - `marks`: (at m, label, colour) pinned on the elevation ridge, labels packed into rows in the elevation band.
+/// - `marks`: skill effects in the elevation band: each name in the band's free space (above or below the lines,
+///   left or right of its bar), a bar from activation to end under it and a tint down to the speed line or the ridge.
+/// - `speed`: (m, m/s) of one uma, drawn across the elevation band on its own scale (ticks on the right); a skill's
+///   stretch of it takes the skill's colour.
 /// - `bands`: one row each under the layout band, a bar per stretch (e.g. when an uma was rushed); the chart grows.
-/// Final leg (from `final_leg_start`) is pink. Hover shows metres, phase, corner/straight, grade and regions there.
+/// Final leg (from `final_leg_start`) is pink. Hover shows metres, phase, corner/straight, grade, speed and what ran
+/// there.
 #[component]
 pub fn CourseProfile(
     distance: f32, elevation: Vec<f32>, corners: Vec<(f32, f32)>, straights: Vec<(f32, f32)>,
     slopes: Vec<(f32, f32, f32)>, phases: Vec<f32>, final_leg_start: f32, regions: Vec<Region>,
-    marks: Vec<Mark>, bands: Vec<Band>,
+    marks: Vec<SkillMark>, bands: Vec<Band>, #[props(default)] speed: Vec<(f32, f32)>,
 ) -> Element {
     let (mut size, cw) = use_width();
     let mut hover = use_signal(|| None::<f32>);
@@ -418,24 +445,75 @@ pub fn CourseProfile(
     let (full_area, final_area, full_ridge) = (area(0.0, dist), area(final_leg_start, dist), pts_str(&ridge(0.0, dist)));
     let slope_ridges: Vec<(String, f32, f32, f32)> = slopes.iter().map(|&(a, b, g)| (pts_str(&ridge(a, b)), a, b, g)).collect();
     let slope_label_y = |a: f32, b: f32| ey(e_at((a + b) / 2.0).max(e_at(a)).max(e_at(b))) - 7.0;
-    // Marks packed by distance into rows from the top of the elevation band, around each other and the slope labels.
-    let row_y = |k: usize| el_y + k as f32 * 13.0 + 10.0;
-    let slope_boxes: Vec<(f32, f32, f32)> = slopes.iter().filter(|s| x(s.1) - x(s.0) > 14.0).map(|&(a, b, g)| {
-        let (c, w) = ((x(a) + x(b)) / 2.0, format!("{g:+.1}%").len() as f32 * 3.4);
-        (c - w, c + w, slope_label_y(a, b))
-    }).collect();
-    let mut row_end: Vec<f32> = vec![];
-    let mut rows = vec![(0usize, 0f32); marks.len()]; // (row, label x)
-    let mut order: Vec<usize> = (0..marks.len()).collect();
-    order.sort_by(|&a, &b| marks[a].0.total_cmp(&marks[b].0));
-    for &i in &order {
-        let lw = marks[i].1.chars().count() as f32 * 6.8;
-        let lx = (x(marks[i].0) + 3.0).min(cw - R - lw);
-        let free = |k: usize, e: f32| e <= lx && !slope_boxes.iter().any(|&(l, r, y)| l < lx + lw && r > lx && (y - row_y(k)).abs() < 12.0);
-        let k = (0..).find(|&k| free(k, row_end.get(k).copied().unwrap_or(0.0))).unwrap();
-        row_end.resize(row_end.len().max(k + 1), 0.0);
-        row_end[k] = lx + lw + 8.0;
-        rows[i] = (k, lx);
+
+    // Speed on its own scale over the band: from the slowest after the start dash (slower clamps to the bottom) to
+    // the fastest, whole m/s.
+    let sp_lo = speed.iter().filter(|p| p.0 > dist * 0.1).map(|p| p.1).fold(f32::MAX, f32::min);
+    let sp_hi = speed.iter().map(|p| p.1).fold(f32::MIN, f32::max);
+    let (sp_lo, sp_hi) = ((sp_lo - 0.5).floor(), (sp_hi + 0.5).ceil().max(sp_lo.floor() + 2.0));
+    let sy = move |v: f32| el_b - 4.0 - (v.clamp(sp_lo, sp_hi) - sp_lo) / (sp_hi - sp_lo) * (EH - 8.0);
+    let s_at = |d: f32| {
+        let k = speed.partition_point(|p| p.0 <= d);
+        match (k.checked_sub(1).map(|i| speed[i]), speed.get(k).copied()) {
+            (Some(a), Some(b)) if b.0 > a.0 => a.1 + (b.1 - a.1) * (d - a.0) / (b.0 - a.0),
+            (Some(p), _) | (None, Some(p)) => p.1,
+            _ => 0.0,
+        }
+    };
+    let s_line = |a: f32, b: f32| {
+        let mut v = vec![(x(a), sy(s_at(a)))];
+        v.extend(speed.iter().filter(|p| p.0 > a && p.0 < b).map(|p| (x(p.0), sy(p.1))));
+        v.push((x(b), sy(s_at(b))));
+        v
+    };
+    let has_speed = !speed.is_empty();
+    let sp_ticks: Vec<f32> = if has_speed { (sp_lo as i32..=sp_hi as i32).filter(|v| v % 2 == 0).map(|v| v as f32).collect() } else { vec![] };
+    // What each mark's tint drops to.
+    let anchor = |d: f32| if has_speed { sy(s_at(d)) } else { ey(e_at(d)) };
+
+    // Mark names: lanes LH apart over the band. A name fits where it clears the other names, the slope labels and
+    // (first pass) the ridge and speed lines along its width; then across a line, never over a name.
+    const LH: f32 = 16.0;
+    let mut boxes: Vec<(f32, f32, f32, f32)> = slopes
+        .iter()
+        .filter(|s| x(s.1) - x(s.0) > 14.0)
+        .map(|&(a, b, g)| {
+            let (c, w, y) = ((x(a) + x(b)) / 2.0, format!("{g:+.1}%").len() as f32 * 3.4, slope_label_y(a, b));
+            (c - w, y - 10.0, c + w, y + 3.0)
+        })
+        .collect();
+    let crosses = |x0: f32, x1: f32, y0: f32, y1: f32| {
+        let mut px = x0;
+        while px <= x1 {
+            let d = (px - L) / pw * dist;
+            let hit = |y: f32| y >= y0 - 2.0 && y <= y1 + 2.0;
+            if hit(ey(e_at(d))) || (has_speed && hit(sy(s_at(d)))) {
+                return true;
+            }
+            px += 4.0;
+        }
+        false
+    };
+    // (label, label x, anchor, lane y) per mark.
+    let mut placed: Vec<(String, f32, &str, f32)> = vec![];
+    for m in marks.iter() {
+        let label = mark_name(&m.name);
+        let (a, z, w) = (x(m.start), x(m.end).max(x(m.start) + 3.0), label.chars().count() as f32 * 6.4);
+        let mut cands: Vec<(f32, f32, &str, f32)> =
+            [(a, (a + w).max(z), "start", a), ((z - w).min(a), z, "end", z)].into_iter().filter(|c| c.0 >= L - 4.0 && c.1 <= cw - R + 2.0).collect();
+        if cands.is_empty() {
+            let s = a.min(cw - R - w).max(L);
+            cands.push((s, s + w, "start", s));
+        }
+        let free = |c: &(f32, f32, &str, f32), y: f32| boxes.iter().all(|&(p, q, r, s)| c.1 + 8.0 <= p || c.0 >= r + 8.0 || y + LH <= q || y >= s);
+        let lanes = || (0..).map(|k| el_y + 2.0 + k as f32 * LH).take_while(|y| y + LH <= el_b);
+        let spot = lanes()
+            .find_map(|y| cands.iter().find(|c| free(c, y) && !crosses(c.0, c.1, y, y + LH)).map(|c| (y, *c)))
+            .or_else(|| lanes().find_map(|y| cands.iter().find(|c| free(c, y)).map(|c| (y, *c))))
+            .unwrap_or((el_y + 2.0, cands[0]));
+        let (y, c) = spot;
+        boxes.push((c.0, y, c.1, y + LH));
+        placed.push((label, c.3, c.2, y));
     }
 
     let bounds = phase_bounds(&phases, dist);
@@ -453,8 +531,11 @@ pub fn CourseProfile(
             None => "Flat".into(),
         });
         parts.push(format!("elevation {:+.1} m", e_at(d) - emin));
+        if has_speed {
+            parts.push(format!("{:.1} m/s", s_at(d)));
+        }
         parts.extend(regions.iter().filter(|r| (r.0..=r.1).contains(&d)).map(|r| r.2.clone()));
-        parts.extend(marks.iter().filter(|m| (m.0 - d).abs() <= dist * 0.006).map(|m| m.1.clone()));
+        parts.extend(marks.iter().filter(|m| (m.start..=m.end.max(m.start + dist * 0.004)).contains(&d)).map(|m| m.name.clone()));
         parts.extend(bands.iter().filter(|b| b.stretches.iter().any(|s| (s.0..=s.1).contains(&d))).map(|b| b.label.clone()));
         parts.join(" · ")
     });
@@ -497,6 +578,15 @@ pub fn CourseProfile(
             // Elevation silhouette; final leg in pink, slopes tinted on the ridge.
             polygon { points: "{full_area}", fill: "var(--muted)", fill_opacity: 0.2 }
             polygon { points: "{final_area}", fill: "var(--accent)", fill_opacity: 0.3 }
+            // Mark tints: from the bar under the name down (or up) to the speed line or the ridge.
+            for (m, (_, _, _, y)) in marks.iter().zip(placed.iter()) {
+                {
+                    let (a, b) = (m.start, m.end.max(m.start + dist * 0.003));
+                    let mut v = vec![(x(a), y + 13.0), (x(b), y + 13.0)];
+                    v.extend(if has_speed { s_line(a, b) } else { ridge(a, b) }.into_iter().rev());
+                    rsx! { polygon { points: "{pts_str(&v)}", fill: "{m.color}", fill_opacity: 0.14 } }
+                }
+            }
             polyline { points: "{full_ridge}", fill: "none", stroke: "var(--muted)", stroke_width: 1.5, stroke_linejoin: "round" }
             for (pts, a, b, g) in slope_ridges.iter() {
                 polyline { points: "{pts}", fill: "none", stroke: if *g > 0.0 { "var(--bad)" } else { "var(--good)" }, stroke_width: 3, stroke_linecap: "round", stroke_linejoin: "round" }
@@ -507,13 +597,15 @@ pub fn CourseProfile(
                     }
                 }
             }
-            // Marks: a stem from the label row down to a dot on the ridge.
-            for (i, (at, label, c)) in marks.iter().enumerate() {
-                line { x1: x(*at), x2: x(*at), y1: row_y(rows[i].0) - 8.0, y2: ey(e_at(*at)), stroke: "{c}", stroke_width: 1, stroke_opacity: 0.7 }
-                circle { cx: x(*at), cy: ey(e_at(*at)), r: 3.5, fill: "{c}", stroke: "var(--surface)", stroke_width: 1.5 }
-                text {
-                    x: rows[i].1, y: row_y(rows[i].0), fill: "var(--ink)", font_size: 11,
-                    stroke: "var(--surface)", stroke_width: 3, paint_order: "stroke", "{label}"
+            // Speed: m/s ticks on the right, the line, each mark's stretch of it in the mark's colour.
+            if has_speed {
+                for &v in sp_ticks.iter() {
+                    line { x1: L, x2: cw - R, y1: sy(v), y2: sy(v), stroke: "var(--grid)", stroke_width: 1, stroke_dasharray: "2 4" }
+                    text { x: cw - R, y: sy(v) - 2.0, fill: "var(--accent-2)", font_size: 9.5, text_anchor: "end", stroke: "var(--surface)", stroke_width: 3, paint_order: "stroke", "{v} m/s" }
+                }
+                polyline { points: "{pts_str(&s_line(0.0, dist))}", fill: "none", stroke: "var(--accent-2)", stroke_width: 1.8, stroke_linejoin: "round" }
+                for m in marks.iter().filter(|m| m.end > m.start) {
+                    polyline { points: "{pts_str(&s_line(m.start, m.end))}", fill: "none", stroke: "{m.color}", stroke_width: 3.4, stroke_linecap: "round", stroke_linejoin: "round" }
                 }
             }
             // Straights / corners band.
@@ -556,6 +648,19 @@ pub fn CourseProfile(
                         x: L + i as f32 * 4.0, y: rg_y, width: 4, height: bot - rg_y, fill: "transparent",
                         onmouseenter: move |_| hover.set(Some((i as f32 * 4.0 + 2.0) / pw * dist))
                     }
+                }
+            }
+            // Mark names over the hover strip, so they keep their own hover: name, the bar under it, a dot where
+            // it activated.
+            for (m, (label, lx, anchor_side, y)) in marks.iter().zip(placed.iter()) {
+                g {
+                    title { "{m.tip}" }
+                    text {
+                        x: *lx, y: y + 10.0, fill: "var(--ink)", font_size: 11, font_weight: 700, text_anchor: "{anchor_side}",
+                        stroke: "var(--surface)", stroke_width: 3, paint_order: "stroke", "{label}"
+                    }
+                    rect { x: x(m.start), y: y + 11.5, width: (x(m.end) - x(m.start)).max(3.0), height: 3.5, rx: 1.75, fill: "{m.color}" }
+                    circle { cx: x(m.start), cy: anchor(m.start), r: 2.8, fill: "{m.color}", stroke: "var(--surface)", stroke_width: 1 }
                 }
             }
         }

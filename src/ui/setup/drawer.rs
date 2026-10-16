@@ -372,7 +372,7 @@ pub fn Drawer() -> Element {
     let Some(i) = s.editing.cloned() else { return rsx! {} };
     let Some(h) = s.input.read().horses.get(i).cloned() else { return rsx! {} };
     let input = s.input.read();
-    let b = s.baseline.cloned().filter(|b| comparable(b, &input)).map(|b| b.horses[i].clone()).unwrap_or_else(|| h.clone());
+    let b = base_horse(s.baseline.cloned().as_deref(), &input, i).cloned().unwrap_or_else(|| h.clone());
     drop(input);
     let changed = !horse_same(&h, &b);
     let (hs, bs) = (stats(&h), stats(&b));

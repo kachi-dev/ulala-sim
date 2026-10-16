@@ -33,7 +33,7 @@ pub(super) fn horse_detail(
     let (mut focus, mut skill_sel, mut detail_tab) = (s.focus, s.skill_sel, s.detail_tab);
     let tab = *detail_tab.read();
     let h = &cur.horses[i];
-    let b = base.map(|b| &b.horses[i]);
+    let b = base.zip(res.base_of(i)).map(|(b, j)| &b.horses[j]);
     // Charts of one uma: the accent; her team / gate colour stays on her icon.
     let color = "var(--accent)".to_string();
     let n = cur.horses.len();

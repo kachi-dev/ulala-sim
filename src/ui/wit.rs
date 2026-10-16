@@ -15,11 +15,10 @@ fn mode_delta(m: usize, d: f32) -> Element {
     if is_downhill(m) { delta(d, false, format!("{:.2} s", d.abs())) } else { rsx! { span { class: "d flat", "{d:+.2} s" } } }
 }
 
-/// Horse `i`'s Wit on the baseline, when it differs from `input`'s.
-pub(super) fn old_wit(s: S, input: &RaceInput, i: usize) -> Option<i32> {
-    let base = s.baseline.read();
-    let b = base.as_deref().filter(|b| comparable(b, input))?;
-    let (old, new) = (b.horses.get(i)?.wiz, input.horses.get(i)?.wiz);
+/// Uma `i`'s Wit on the baseline, when it differs from the setup's.
+pub(super) fn old_wit(s: S, i: usize) -> Option<i32> {
+    let (base, input) = (s.baseline.read(), s.input.read());
+    let (old, new) = (base_horse(base.as_deref(), &input, i)?.wiz, input.horses.get(i)?.wiz);
     (old != new).then_some(old)
 }
 
@@ -98,7 +97,7 @@ pub(super) fn WitRun(i: usize) -> Element {
     let s = use_context::<S>();
     let running = use_busy(s);
     let Some(input) = setup_for(s, i) else { return rsx! {} };
-    let Some(old) = old_wit(s, &input, i) else { return rsx! {} };
+    let Some(old) = old_wit(s, i) else { return rsx! {} };
     let new = input.horses[i].wiz;
     let n = *s.w_n.read();
     // Per seed: the baseline, then each mechanic on the new Wit, then all of them.
@@ -133,7 +132,7 @@ pub(super) fn WitRun(i: usize) -> Element {
 pub(super) fn WitOut(i: usize) -> Element {
     let s = use_context::<S>();
     let input = s.input.read();
-    let Some(old) = old_wit(s, &input, i) else { return rsx! {} };
+    let Some(old) = old_wit(s, i) else { return rsx! {} };
     let new = input.horses[i].wiz;
     match s.w_res.cloned().filter(|r| (r.horse, r.old, r.new) == (i, old, new)) {
         Some(r) => rsx! { WitResults { r } },

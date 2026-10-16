@@ -21,8 +21,9 @@ fn team_wr(res: &Res, cur: &Batch, base: Option<&Arc<Batch>>) -> Element {
     if ts.is_empty() {
         return rsx! {};
     }
-    let wr = |b: &Batch, t: i32| -> f32 {
-        res.input.horses.iter().zip(&b.horses).filter(|(h, _)| h.team_id == t).map(|(_, s)| s.win_rate).sum()
+    // Team `t`'s win rate in `b`, run on field `inp`.
+    let wr = |inp: &RaceInput, b: &Batch, t: i32| -> f32 {
+        inp.horses.iter().zip(&b.horses).filter(|(h, _)| h.team_id == t).map(|(_, s)| s.win_rate).sum()
     };
     rsx! {
         div { class: "team-wr",
@@ -30,8 +31,8 @@ fn team_wr(res: &Res, cur: &Batch, base: Option<&Arc<Batch>>) -> Element {
             for t in ts {
                 {
                     let i0 = res.input.horses.iter().position(|h| h.team_id == t).unwrap_or(0);
-                    let now = wr(cur, t);
-                    let was = base.map(|b| wr(b, t));
+                    let now = wr(&res.input, cur, t);
+                    let was = base.zip(res.base_input.as_deref()).map(|(b, inp)| wr(inp, b, t));
                     rsx! {
                         div { key: "{t}", class: "tw",
                             {team_tags(&res.input, res.player, i0)}
@@ -51,12 +52,12 @@ fn team_wr(res: &Res, cur: &Batch, base: Option<&Arc<Batch>>) -> Element {
 pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, base: Option<&Arc<Batch>>) -> Element {
     let mut focus = s.focus;
     let f = *focus.read();
-    let diffs = base.map(|b| diff_batches(b, cur));
+    let diffs = base.map(|b| diff_batches(b, cur, &res.pairs));
     let n = cur.horses.len();
     let ed = &res.ed_mask;
     let mut order: Vec<usize> = (0..n).collect();
     order.sort_by(|&a, &b| cur.horses[a].place.mean.total_cmp(&cur.horses[b].place.mean));
-    let improved = diffs.as_ref().is_some_and(|d| d.iter().zip(ed).any(|(d, &m)| m && d.win_rate.1 > d.win_rate.0 + 0.005));
+    let improved = diffs.as_ref().is_some_and(|d| d.iter().zip(ed).any(|(d, &m)| m && d.as_ref().is_some_and(|d| d.win_rate.1 > d.win_rate.0 + 0.005)));
     rsx! {
         section { class: "card",
             div { class: "card-h",
@@ -83,7 +84,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                         for i in order {
                             {
                                 let h = &cur.horses[i];
-                                let d = diffs.as_ref().map(|d| &d[i]);
+                                let d = diffs.as_ref().and_then(|d| d[i].as_ref());
                                 let card = res.input.horses[i].card_id;
                                 rsx! {
                                     tr {
@@ -138,9 +139,9 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                                                 rsx! {
                                                     td { class: "num",
                                                         if rate > 0.0 { b { "{pct(rate)}" } } else { span { class: "muted", "-" } }
-                                                        if let Some(b) = base {
+                                                        if let Some(b) = base.zip(res.base_of(i)).map(|(b, j)| &b.horses[j]) {
                                                             {
-                                                                let (was, was_s) = b.horses[i].states[kind as usize];
+                                                                let (was, was_s) = b.states[kind as usize];
                                                                 state_arrow(was, rate, 0.0005, more_good, format!("was {} · {was_s:.1}s", pct(was)))
                                                             }
                                                         }
@@ -158,7 +159,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
             }
         }
         if let Some(i) = f.filter(|&i| i < n) {
-            {horse_detail(s, res, i, cur, base, diffs.as_ref().map(|d| &d[i]))}
+            {horse_detail(s, res, i, cur, base, diffs.as_ref().and_then(|d| d[i].as_ref()))}
         }
     }
 }

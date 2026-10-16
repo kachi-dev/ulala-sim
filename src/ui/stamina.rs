@@ -30,7 +30,11 @@ pub(super) fn StaminaRun(i: usize) -> Element {
     let s = use_context::<S>();
     let running = use_busy(s);
     let (Some(input), Some(race), Some(cv)) = (setup_for(s, i), s.race.cloned(), s.cview.cloned()) else { return rsx! {} };
-    let base = s.baseline.cloned().filter(|b| has_edits(Some(b), &input));
+    // The baseline as it runs, and uma `i` in it (none when she was added since).
+    let base = s.baseline.cloned().filter(|b| has_edits(Some(b), &s.input.peek())).and_then(|b| {
+        let j = pairing(&b, &s.input.peek()).get(i).copied().flatten()?;
+        Some((Arc::new(setup::filled(s, &race, &b)), j))
+    });
     let n = *s.st_n.read();
     // Per seed: as is, at max stamina, each debuff muted, all muted; the baseline as is and at max stamina.
     let n_debuffs = field_debuffs(&race, &input, i).len();
@@ -47,7 +51,7 @@ pub(super) fn StaminaRun(i: usize) -> Element {
         let run = move |w: &Work| {
             // Same seeds for both, so they differ only by the edits.
             let st = Arc::new(stamina(&race, &input, i, &seeds, true, w));
-            (st, base.as_ref().map(|b| Arc::new(stamina(&race, b, i, &seeds, false, w))))
+            (st, base.as_ref().map(|(b, j)| Arc::new(stamina(&race, b, *j, &seeds, false, w))))
         };
         measure(s, label, total, work, run, move |mut s, (st, base)| {
             s.st_dsel.set(None);

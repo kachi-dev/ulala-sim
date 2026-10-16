@@ -122,18 +122,24 @@ pub(super) fn FieldCard() -> Element {
     let base = s.baseline.cloned();
     let trainers = s.trainers.read();
     let cv = s.cview.cloned();
+    let pairs = base.as_deref().map(|b| pairing(b, &input)).unwrap_or_default();
     let mask = edited_mask(base.as_deref(), &input);
-    let n_edit = mask.iter().filter(|&&m| m).count();
     let n = input.horses.len();
+    // What changed since the baseline: umas added, edited and removed (pairs to it by `pairing`).
+    let changes = base.as_deref().map_or(String::new(), |b| {
+        let paired = pairs.iter().flatten().count();
+        let edited = pairs.iter().zip(input.horses.iter()).filter(|(p, h)| p.is_some_and(|j| !horse_same(&b.horses[j], h))).count();
+        let parts = [(n - paired, "added"), (edited, "edited"), (b.horses.len() - paired, "removed")];
+        parts.iter().filter(|p| p.0 > 0).map(|(k, w)| format!("{k} {w}")).collect::<Vec<_>>().join(", ")
+    });
     let comparable_now = base.as_deref().is_none_or(|b| comparable(b, &input));
     let can_reset = base.as_deref().is_some_and(|b| differs(b, &input));
     let compact = *s.compact.read();
     let sel = (*s.sel.read()).min(n.saturating_sub(1));
     let player = player_now(&race, &input);
     let cols = uma_colors(&input, player);
-    let pair_base = base.as_deref().filter(|b| comparable(b, &input));
     let rows = input.horses.iter().enumerate().map(|(i, h)| {
-        let b = pair_base.map(|b| &b.horses[i]);
+        let b = base.as_deref().zip(pairs.get(i).copied().flatten()).map(|(b, j)| &b.horses[j]);
         let (hs, bs) = (stats(h), stats(b.unwrap_or(h)));
         let apts = key_apts(h, cv.as_deref());
         let poor = poor_apts(h, cv.as_deref());
@@ -179,7 +185,7 @@ pub(super) fn FieldCard() -> Element {
                     onclick: move |_| select(s, i),
                     ondoubleclick: move |_| s.editing.set(Some(i)),
                     // On the top border, out of the layout: a tag in the name line would push the row taller.
-                    if mask[i] { span { class: "tag edited-badge", "edited" } }
+                    if mask[i] { span { class: "tag edited-badge", if pairs.get(i).is_some_and(Option::is_some) { "edited" } else { "new" } } }
                     span { class: "gate", "{i + 1}" }
                     {horse_icon(h, Some(&cols[i]), "md")}
                     div { class: "uma-name",
@@ -214,7 +220,7 @@ pub(super) fn FieldCard() -> Element {
                     onclick: move |_| select(s, i),
                     ondoubleclick: move |_| s.editing.set(Some(i)),
                     // On the top border, out of the layout: a tag in the name line would push the row taller.
-                    if mask[i] { span { class: "tag edited-badge", "edited" } }
+                    if mask[i] { span { class: "tag edited-badge", if pairs.get(i).is_some_and(Option::is_some) { "edited" } else { "new" } } }
                     div { class: "uma-h",
                         {horse_icon(h, Some(&cols[i]), "lg")}
                         div { class: "uma-name",
@@ -280,9 +286,9 @@ pub(super) fn FieldCard() -> Element {
                 }
                 div { class: "grow" }
                 if !comparable_now {
-                    span { class: "muted small", "Field size differs from the baseline, so runs are not compared." }
+                    span { class: "muted small", "No umas in common with the baseline, so runs are not compared." }
                 } else if has_edits(base.as_deref(), &input) {
-                    span { class: "muted small", if n_edit > 0 { "{n_edit} edited" } else { "conditions edited" } }
+                    span { class: "muted small", if changes.is_empty() { "conditions edited" } else { "{changes}" } }
                 }
                 if can_reset {
                     button { class: "btn ghost", onclick: move |_| reset_to_baseline(s),

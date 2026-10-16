@@ -12,27 +12,31 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
     let rtab = *run_tab.read();
     let n = cur.horses.len();
     let f = (*focus.read()).filter(|&f| f < n);
-    let diffs = base.map(|b| diff_runs(b, cur));
+    let diffs = base.map(|b| diff_runs(b, cur, &res.pairs));
     let ed = &res.ed_mask;
+    // Horse `i`'s baseline counterpart (None: added since, or no baseline).
+    let bh = |i: usize| base.zip(res.base_of(i)).map(|(b, j)| &b.horses[j]);
     let mut order: Vec<usize> = (0..n).collect();
     order.sort_by_key(|&i| cur.horses[i].place);
-    let improved = diffs.as_ref().is_some_and(|d| d.iter().zip(ed).any(|(d, &m)| m && d.place.1 < d.place.0));
+    let improved = diffs.as_ref().is_some_and(|d| d.iter().zip(ed).any(|(d, &m)| m && d.as_ref().is_some_and(|d| d.place.1 < d.place.0)));
 
     // Focused: that uma's chart. Else every uma's position, edited ones on top with their baseline dashed.
     let me = f.unwrap_or(order[0]);
-    let line = |run: &Run, i: usize, dashed: bool| PlaceSeries {
+    // Uma `i`'s positions in `run`, where she is horse `j`.
+    let line = |run: &Run, i: usize, j: usize, dashed: bool| PlaceSeries {
         label: if dashed { format!("{} (baseline)", names[i]) } else { names[i].clone() },
         color: res.colors[i].clone(),
-        line: run.horses[i].place_by_progress.iter().map(|&p| p as f32).collect(),
+        line: run.horses[j].place_by_progress.iter().map(|&p| p as f32).collect(),
         inner: None,
         outer: None,
         dashed,
         highlight: ed[i],
     };
-    let mut series: Vec<PlaceSeries> = base.map_or(vec![], |b| (0..n).filter(|&i| ed[i]).map(|i| line(b, i, true)).collect());
-    series.extend((0..n).map(|i| line(cur, i, false)));
-    let traces = |run: &Run| {
-        let h = &run.horses[me];
+    let mut series: Vec<PlaceSeries> =
+        base.map_or(vec![], |b| (0..n).filter(|&i| ed[i]).filter_map(|i| res.base_of(i).map(|j| line(b, i, j, true))).collect());
+    series.extend((0..n).map(|i| line(cur, i, i, false)));
+    let traces = |run: &Run, j: usize| {
+        let h = &run.horses[j];
         let t = |line: Vec<f32>| Trace { line, fan: vec![] };
         RaceTraces {
             place: t(h.place_by_progress.iter().map(|&p| p as f32).collect()),
@@ -79,7 +83,7 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                             for i in order {
                                 {
                                     let h = &cur.horses[i];
-                                    let d = diffs.as_ref().map(|d| &d[i]);
+                                    let d = diffs.as_ref().and_then(|d| d[i].as_ref());
                                     let card = res.input.horses[i].card_id;
                                     rsx! {
                                         tr {
@@ -115,7 +119,7 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                                             td { class: "num",
                                                 {
                                                     let (ok, label) = spurt_label(h);
-                                                    let was = base.map(|b| spurt_label(&b.horses[i]).1).filter(|w| *w != label);
+                                                    let was = bh(i).map(|b| spurt_label(b).1).filter(|w| *w != label);
                                                     rsx! {
                                                         span { class: if ok { "ok nowrap" } else { "no nowrap" }, "{label}" }
                                                         if let Some(w) = was { div { class: "was", "was {w}" } }
@@ -125,7 +129,7 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                                             td { class: "num",
                                                 {
                                                     let label = hp_label(h, cur.goal);
-                                                    let was = base.map(|b| hp_label(&b.horses[i], b.goal)).filter(|w| *w != label);
+                                                    let was = base.zip(bh(i)).map(|(b, bh)| hp_label(bh, b.goal)).filter(|w| *w != label);
                                                     rsx! {
                                                         span { class: if h.hp_out { "no nowrap" } else { "ok nowrap" }, title: "Died: ran out of HP this far before the goal", "{label}" }
                                                         if let Some(w) = was { div { class: "was", "was {w}" } }
@@ -139,9 +143,9 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                                                     rsx! {
                                                         td { class: "num",
                                                             if t > 0.0 { "{t:.1}s" } else { span { class: "muted", "-" } }
-                                                            if let Some(b) = base {
+                                                            if let Some(b) = bh(i) {
                                                                 {
-                                                                    let was = b.horses[i].state_time[kind as usize];
+                                                                    let was = b.state_time[kind as usize];
                                                                     state_arrow(was, t, 0.05, more_good, format!("was {was:.1}s"))
                                                                 }
                                                             }
@@ -149,13 +153,15 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                                                     }
                                                 }
                                             }
-                                            if let Some(d) = d {
+                                            if base.is_some() {
                                                 td { class: "skills",
-                                                    for id in d.skills_gained.iter() {
-                                                        SkillX { id: *id, extra: "added" }
-                                                    }
-                                                    for id in d.skills_lost.iter() {
-                                                        SkillX { id: *id, extra: "removed" }
+                                                    if let Some(d) = d {
+                                                        for id in d.skills_gained.iter() {
+                                                            SkillX { id: *id, extra: "added" }
+                                                        }
+                                                        for id in d.skills_lost.iter() {
+                                                            SkillX { id: *id, extra: "removed" }
+                                                        }
                                                     }
                                                 }
                                             }
@@ -190,18 +196,18 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                 if tab == DetailTab::Skills {
                     {activations(res, names, cur, Some(f))}
                 } else {
-                    {event_kpis(&cur.horses[f], base.map(|b| &b.horses[f]))}
+                    {event_kpis(&cur.horses[f], bh(f))}
                     h4 { "Over the course" }
                     RaceChart {
-                        cur: traces(cur),
-                        base: base.map(traces),
+                        cur: traces(cur, me),
+                        base: base.zip(res.base_of(me)).map(|(b, j)| traces(b, j)),
                         field_size: n,
                         course_distance: cv.distance,
                         phases: cv.phases.to_vec(),
                         corners: cv.corner_spans(),
                         straights: cv.straights.iter().map(|c| (c.start, c.end)).collect::<Vec<_>>(),
                         bands: state_bands(&cur.horses[me]),
-                        base_bands: base.map_or(vec![], |b| state_bands(&b.horses[me])),
+                        base_bands: bh(me).map_or(vec![], state_bands),
                     }
                 }
             }

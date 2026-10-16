@@ -34,6 +34,8 @@
   --on-accent: #2a0c1e;
   --on-accent-2: #082537;
   --danger: #e2544c;
+  --sk-speed: #f3c24b;
+  --sk-accel: #ff8a5c;
   color-scheme: dark;
 }
 :root[data-theme=light] {
@@ -65,6 +67,8 @@
   --on-accent: #3a0a22;
   --on-accent-2: #082537;
   --danger: #d9433b;
+  --sk-speed: #c98d00;
+  --sk-accel: #e2602c;
   color-scheme: light;
 }
 :root { --radius: 14px; }
@@ -114,6 +118,7 @@ body.resizing { cursor: col-resize; user-select: none; }
    (Not scaled to fit: a height-driven SVG fed the charts' width tracking into a render loop that crashed WebView2.) */
 .topchart { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 8px 20px 4px; position: relative; background: var(--surface); }
 .topchart .hint { margin: 0 0 2px; }
+.topchart .median { font-weight: 700; color: var(--sub-ink); font-variant-numeric: tabular-nums; }
 .hdivider { cursor: row-resize; background: var(--line); opacity: .5; transition: opacity .15s, background .15s; touch-action: none; }
 .hdivider:hover, body.resizing-v .hdivider { opacity: 1; background: var(--accent); }
 body.resizing-v { cursor: row-resize; user-select: none; }
@@ -121,8 +126,8 @@ body.resizing-v { cursor: row-resize; user-select: none; }
 .right > .pane { grid-area: 4 / 1; padding: 14px 20px 40px; }
 .pane[hidden] { display: flex; visibility: hidden; }
 /* Subtab switch: holds the old scroll bottom (--hold, set in SPLIT_JS) so a shorter tab leaves blank space instead of jumping up. */
-.right > .pane { position: relative; }
-.pane::after { content: ""; position: absolute; top: var(--hold, 0); width: 1px; height: 1px; pointer-events: none; }
+.right > .pane { position: relative; overflow-anchor: none; }
+.pane::after { content: ""; position: absolute; top: calc(var(--hold, 1px) - 1px); width: 1px; height: 1px; pointer-events: none; }
 .pane > *, .left > * { width: 100%; max-width: 1500px; margin-left: auto; margin-right: auto; flex: none; }
 .rtabs { display: flex; gap: 2px; padding: 8px 20px 0; border-bottom: 1px solid var(--line); }
 .rtab { font: inherit; font-size: 13.5px; font-weight: 800; border: 0; background: none; color: var(--muted); padding: 7px 14px 9px; cursor: pointer; position: relative; border-bottom: 2.5px solid transparent; margin-bottom: -1px; }

@@ -8,12 +8,13 @@ mod npcs;
 mod run;
 
 use super::*;
-use crate::charts::{Band, Bins, CourseProfile, Mark, Region};
+use crate::charts::{Band, Bins, CourseProfile, Region, SkillMark};
 use course::CourseCard;
 pub use drawer::{Drawer, Picker};
 pub use npcs::NpcDrawer;
 use field::FieldCard;
 use run::RunBar;
+pub(super) use run::filled;
 
 #[component]
 pub fn SetupTab() -> Element {
@@ -77,31 +78,73 @@ fn one_region(name: &str, distances: &[f32], course: f32) -> Vec<Region> {
     span(distances, course).map(|(a, b, bins)| (a, b, name.to_string(), "var(--accent)".to_string(), bins)).into_iter().collect()
 }
 
+/// A batch uma's median race: the seed where her finish time is the median of the batch's, run again in full.
+#[derive(Clone)]
+struct MedianRun {
+    run: Arc<Run>,
+    horse: usize,
+    seed: i32,
+    seeds: usize,
+    time: f32,
+    place: u8,
+}
+
+impl PartialEq for MedianRun {
+    fn eq(&self, o: &Self) -> bool {
+        Arc::ptr_eq(&self.run, &o.run)
+    }
+}
+
+/// The focused uma's median race of the shown batch (None: a single run, no focus, or no batch).
+fn median_run(s: S) -> Option<MedianRun> {
+    let (res, race, horse) = (s.res.cloned()?, s.race.cloned()?, (*s.focus.read())?);
+    let Kind::Batch { cur, .. } = &res.kind else { return None };
+    let times = &cur.horses.get(horse)?.times;
+    let mut order: Vec<usize> = (0..times.len()).collect();
+    order.sort_by(|&a, &b| times[a].total_cmp(&times[b]));
+    let k = *order.get(order.len() / 2)?;
+    let seed = cur.seeds[k];
+    let run = Arc::new(run_once(&race, &RaceInput { random_seed: seed, ..(*res.input).clone() }));
+    Some(MedianRun { run, horse, seed, seeds: cur.seeds.len(), time: times[k], place: cur.horses[horse].places[k] })
+}
+
 /// The course, pinned above the analysis tabs. Regions follow the tab: Results = the focused uma's activations pinned
-/// on the course (all in small fields; single runs only), Skill gains = the open skill, Uma ranking = the open unique.
+/// on the course (all in small fields; single runs; a batch shows the focused uma's median race), Skill gains = the
+/// open skill, Uma ranking = the open unique.
 #[component]
 pub fn TopCourse() -> Element {
     let s = use_context::<S>();
+    let median = use_memo(move || median_run(s));
     let Some(cv) = s.cview.cloned() else { return rsx! {} };
     let tab = *s.tab.read();
     let same = |c: &CourseView| c.info.id == cv.info.id;
     let mut hint = None;
-    let mut marks: Vec<Mark> = vec![];
+    let mut median_label = None;
+    let mut marks: Vec<SkillMark> = vec![];
+    let mut speed = vec![];
     let mut bands: Vec<Band> = vec![];
     let regions: Vec<Region> = match tab {
         Tab::Results => match s.res.cloned().filter(|r| same(&r.cv)) {
-            // A skill open in the batch uma detail: just that skill.
-            Some(Res { kind: Kind::Batch { cur, .. }, .. }) if s.skill_sel.read().is_some_and(|(h, _)| Some(h) == *s.focus.read()) => {
-                let (h, id) = s.skill_sel.read().unwrap_or_default();
-                let st = cur.horses.get(h).and_then(|hs| hs.skills.iter().find(|k| k.skill_id == id));
-                st.map_or(vec![], |st| one_region(&skill_info(id).name, &st.distances, cv.distance))
-            }
             Some(r) => {
-                let need;
-                (marks, need) = activations(&r, *s.focus.read());
-                bands = states(&r, *s.focus.read());
-                if need {
-                    hint = Some("Select an uma to see where its skills activate.");
+                match &r.kind {
+                    Kind::Single { cur, .. } => {
+                        let cs = activations(&r, cur, *s.focus.read());
+                        (marks, speed) = (cs.marks, cs.speed);
+                        bands = states(cur, *s.focus.read());
+                        if cs.need_focus {
+                            hint = Some("Select an uma to see where its skills activate.");
+                        }
+                    }
+                    // A batch: the focused uma's median race, as a single run.
+                    Kind::Batch { .. } => {
+                        if let Some(m) = median() {
+                            let cs = activations(&r, &m.run, Some(m.horse));
+                            (marks, speed) = (cs.marks, cs.speed);
+                            bands = states(&m.run, Some(m.horse));
+                            let place = crate::ui::cm::ordinal(m.place as usize);
+                            median_label = Some(format!("Median race of {} seeds · seed {} · {} · {place}", thousands(m.seeds), m.seed, ft(m.time)));
+                        }
+                    }
                 }
                 vec![]
             }
@@ -133,33 +176,89 @@ pub fn TopCourse() -> Element {
                 regions,
                 marks,
                 bands,
+                speed,
             }
             if let Some(h) = hint { p { class: "muted small hint", "{h}" } }
+            if let Some(l) = median_label { p { class: "small hint median", "{l}" } }
         }
     }
 }
 
-/// The focused uma's race states in a single run, a band row per state it was in.
-fn states(res: &Res, focus: Option<usize>) -> Vec<Band> {
-    let (Kind::Single { cur, .. }, Some(f)) = (&res.kind, focus) else { return vec![] };
-    cur.horses.get(f).map_or(vec![], state_bands)
+/// The focused uma's race states and position keep modes in run `cur`, a band row per one she was in.
+fn states(cur: &Run, focus: Option<usize>) -> Vec<Band> {
+    focus.and_then(|f| cur.horses.get(f)).map_or(vec![], course_bands)
 }
 
-/// At most this many marks in the pinned course (the full list is in Skill activations).
+/// At most this many skills in the pinned course when it shows several umas (the full list is in Skill activations).
 const MAX_MARKS: usize = 8;
 
-/// Single-run activations for the course preview: the focused uma, or everyone in small fields. True = too many
-/// umas to show, pick one. Batches show none: the uma detail's Skills chart covers it.
-fn activations(res: &Res, focus: Option<usize>) -> (Vec<Mark>, bool) {
-    let Kind::Single { cur, .. } = &res.kind else { return (vec![], false) };
+/// A skill's colour on the course, by what it does.
+fn effect_color(id: i32) -> &'static str {
+    match skill_info(id).effects.first().copied() {
+        Some("Speed") => "var(--sk-speed)",
+        Some("Acceleration") => "var(--sk-accel)",
+        Some("Recovery") => "var(--good)",
+        Some("Debuff" | "Stamina drain" | "Negative") => "var(--bad)",
+        _ => "var(--muted)",
+    }
+}
+
+/// Single-run skill effects for the course preview.
+struct CourseSkills {
+    marks: Vec<SkillMark>,
+    /// The focused uma's speed, (m, m/s) to the goal.
+    speed: Vec<(f32, f32)>,
+    /// Too many umas to show: pick one.
+    need_focus: bool,
+}
+
+/// Run `cur`'s skill effects: the focused uma's (coloured by what they do) with her speed, or everyone's in small
+/// fields (in their colours, no speed). Passive skills (whole race) are left out.
+fn activations(res: &Res, cur: &Run, focus: Option<usize>) -> CourseSkills {
+    let mut cs = CourseSkills { marks: vec![], speed: vec![], need_focus: false };
     let n = res.input.horses.len();
     let who: Vec<usize> = match focus {
         Some(f) if f < n => vec![f],
         _ if n <= 6 => (0..n).collect(),
-        _ => return (vec![], true),
+        _ => {
+            cs.need_focus = true;
+            return cs;
+        }
     };
-    // One uma: the accent; several: their own colours, to tell them apart.
-    let color = |h: usize| if who.len() == 1 { "var(--accent)".to_string() } else { res.colors[h].clone() };
-    let out = cur.activations.iter().filter(|a| who.contains(&a.horse) && a.distance >= 1.0).take(MAX_MARKS);
-    (out.map(|a| (a.distance, skill_info(a.skill_id).name, color(a.horse))).collect(), false)
+    let one = who.len() == 1;
+    for a in cur.activations.iter().filter(|a| who.contains(&a.horse) && !a.passive) {
+        let info = skill_info(a.skill_id);
+        let finish = cur.out.results.get(a.horse).map_or(f32::MAX, |r| r.finish_time_raw);
+        let what = skill_parts(a.skill_id).first().map(|p| p.effects.join(", ")).unwrap_or_default();
+        let secs = a.end_time - a.time;
+        let when = if secs < 0.01 {
+            format!("at {:.0} m ({})", a.distance, ft(a.time))
+        } else {
+            format!("{:.0} to {:.0} m · {secs:.1} s ({} to {})", a.distance, a.end, ft(a.time), ft(a.end_time))
+        };
+        let cut = if secs >= 0.01 && a.end_time >= finish - 0.001 { " · cut short by the finish" } else { "" };
+        let who_line = if one { String::new() } else { format!("{}\n", horse_name(&res.input.horses[a.horse])) };
+        cs.marks.push(SkillMark {
+            start: a.distance,
+            end: a.end,
+            color: if one { effect_color(a.skill_id).to_string() } else { res.colors[a.horse].clone() },
+            tip: format!("{who_line}{}\n{what}\n{when}{cut}", info.name),
+            name: info.name,
+        });
+    }
+    if !one {
+        cs.marks.truncate(MAX_MARKS);
+        return cs;
+    }
+    let h = who[0];
+    let mut speed = vec![];
+    for f in cur.out.frames.iter() {
+        let hf = &f.horses[h];
+        speed.push((hf.distance.min(cur.goal), hf.speed));
+        if hf.distance >= cur.goal {
+            break;
+        }
+    }
+    cs.speed = speed;
+    cs
 }

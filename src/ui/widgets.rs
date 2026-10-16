@@ -556,17 +556,36 @@ pub(super) const EVENTS: [RaceEvent; 5] = {
     ]
 };
 
+/// Position keep modes, shown on the pinned course only: (label, colour, `span_kind`s, 24x24 stroke icon).
+const POSITION_KEEP: [(&str, &str, &[u8], &str); 4] = {
+    use uma_race_sim::api::span_kind as k;
+    [
+        // Double chevron.
+        ("Speed up", "#4fd1c5", &[k::SPEED_UP], "M5 6l6 6-6 6M12 6l6 6-6 6"),
+        // Arrow swinging round to the front.
+        ("Overtake", "#7d93ff", &[k::OVERTAKE], "M4 19h6a4 4 0 0 0 4-4V5M10 9l4-4 4 4"),
+        ("Pace up", "#e58fff", &[k::PACE_UP, k::PACE_UP_EX], "M12 19V5M5 12l7-7 7 7"),
+        ("Pace down", "#8fb3c9", &[k::PACE_DOWN], "M12 5v14M19 12l-7 7-7-7"),
+    ]
+};
+
+fn band(h: &HorseRun, label: &str, color: &str, kinds: &[u8], icon: &str) -> crate::charts::Band {
+    crate::charts::Band {
+        label: label.to_string(),
+        color: color.to_string(),
+        icon: icon.to_string(),
+        stretches: h.spans.iter().filter(|s| kinds.contains(&s.0)).map(|s| (s.1, s.2)).collect(),
+        secs: kinds.iter().map(|&k| h.state_time[k as usize]).sum(),
+    }
+}
+
 /// One uma's race events in a single run as chart bands, one per event it was in.
 pub(super) fn state_bands(h: &HorseRun) -> Vec<crate::charts::Band> {
-    EVENTS
-        .iter()
-        .map(|e| crate::charts::Band {
-            label: e.short.to_string(),
-            color: e.color.to_string(),
-            icon: e.icon.to_string(),
-            stretches: h.spans.iter().filter(|s| s.0 == e.kind).map(|s| (s.1, s.2)).collect(),
-            secs: h.state_time[e.kind as usize],
-        })
-        .filter(|b| !b.stretches.is_empty())
-        .collect()
+    EVENTS.iter().map(|e| band(h, e.short, e.color, &[e.kind], e.icon)).filter(|b| !b.stretches.is_empty()).collect()
+}
+
+/// `state_bands` plus the position keep modes she was in, for the pinned course.
+pub(super) fn course_bands(h: &HorseRun) -> Vec<crate::charts::Band> {
+    let pk = POSITION_KEEP.iter().map(|&(label, color, kinds, icon)| band(h, label, color, kinds, icon));
+    state_bands(h).into_iter().chain(pk.filter(|b| !b.stretches.is_empty())).collect()
 }

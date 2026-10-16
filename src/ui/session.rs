@@ -111,6 +111,8 @@ pub(super) fn open(mut s: S, path: PathBuf) {
                     colors: Arc::new(uma_colors(&race.input, race.player)),
                     player: race.player,
                     ed_mask: vec![false; n],
+                    pairs: vec![None; n],
+                    base_input: None,
                     cv,
                     rev,
                 }));
@@ -136,25 +138,62 @@ pub(super) fn conditions_same(a: &RaceInput, b: &RaceInput) -> bool {
         == (b.course_set_id, b.ground_condition, b.weather, b.season, b.time)
 }
 
-/// Same field size as the baseline, so horses pair up by gate.
-pub(super) fn comparable(base: &RaceInput, cur: &RaceInput) -> bool {
-    base.horses.len() == cur.horses.len()
+/// Each of `cur`'s umas' baseline uma (None: added since). Umas keep their order (adding appends, duplicating inserts
+/// after the original, removing drops one), so this is the order-keeping alignment that pairs the most alike: the
+/// same uma unchanged first, then the same costume, then any uma in its place (an uma changed to another costume).
+pub(super) fn pairing(base: &RaceInput, cur: &RaceInput) -> Vec<Option<usize>> {
+    let (b, c) = (&base.horses, &cur.horses);
+    let score = |i: usize, j: usize| if horse_same(&b[i], &c[j]) { 3 } else if b[i].card_id == c[j].card_id { 2 } else { 1 };
+    // best[i][j]: best total pairing b[i..] with c[j..].
+    let mut best = vec![vec![0u32; c.len() + 1]; b.len() + 1];
+    for i in (0..b.len()).rev() {
+        for j in (0..c.len()).rev() {
+            best[i][j] = (best[i + 1][j + 1] + score(i, j)).max(best[i + 1][j]).max(best[i][j + 1]);
+        }
+    }
+    let (mut out, mut i, mut j) = (vec![None; c.len()], 0, 0);
+    while i < b.len() && j < c.len() {
+        if best[i][j] == best[i + 1][j + 1] + score(i, j) {
+            out[j] = Some(i);
+            (i, j) = (i + 1, j + 1);
+        } else if best[i][j] == best[i + 1][j] {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    out
 }
 
-/// Per horse: differs from the baseline (all false when there is nothing to compare with).
+/// Some uma is in both the baseline and the setup, so runs can be compared.
+pub(super) fn comparable(base: &RaceInput, cur: &RaceInput) -> bool {
+    pairing(base, cur).iter().any(Option::is_some)
+}
+
+/// Uma `i` of `cur` as it is on the baseline (None: no baseline, or added since).
+pub(super) fn base_horse<'b>(base: Option<&'b RaceInput>, cur: &RaceInput, i: usize) -> Option<&'b HorseInput> {
+    let b = base?;
+    pairing(b, cur).get(i).copied().flatten().map(|j| &b.horses[j])
+}
+
+/// Per horse: differs from the baseline, or added since (all false when there is nothing to compare with).
 pub(super) fn edited_mask(base: Option<&RaceInput>, cur: &RaceInput) -> Vec<bool> {
     match base.filter(|b| comparable(b, cur)) {
-        Some(b) => b.horses.iter().zip(&cur.horses).map(|(a, c)| !horse_same(a, c)).collect(),
+        Some(b) => pairing(b, cur).iter().zip(&cur.horses).map(|(p, c)| p.is_none_or(|j| !horse_same(&b.horses[j], c))).collect(),
         None => vec![false; cur.horses.len()],
     }
 }
 
-/// Anything to diff against the baseline?
+/// Anything to diff against the baseline? Conditions, umas edited, added or removed, with some uma in both.
 pub(super) fn has_edits(base: Option<&RaceInput>, cur: &RaceInput) -> bool {
-    base.is_some_and(|b| comparable(b, cur) && (!conditions_same(b, cur) || b.horses.iter().zip(&cur.horses).any(|(a, c)| !horse_same(a, c))))
+    base.is_some_and(|b| {
+        let p = pairing(b, cur);
+        p.iter().any(Option::is_some)
+            && (!conditions_same(b, cur) || b.horses.len() != cur.horses.len() || p.iter().zip(&cur.horses).any(|(p, c)| p.is_none_or(|j| !horse_same(&b.horses[j], c))))
+    })
 }
 
-/// Setup differs from the baseline in any way (incl. field size): offer a reset.
+/// Setup differs from the baseline in any way: offer a reset.
 pub(super) fn differs(base: &RaceInput, cur: &RaceInput) -> bool {
     !comparable(base, cur) || has_edits(Some(base), cur) || base.random_seed != cur.random_seed
 }
@@ -244,4 +283,31 @@ pub(super) fn stats(h: &HorseInput) -> [i32; 5] {
 /// Puts `v` back into input `id` (after a rejected or clamped entry, the box would otherwise keep the typed text).
 pub(super) fn resync(id: &str, v: impl std::fmt::Display) {
     document::eval(&format!("{{ const e = document.getElementById('{id}'); if (e) e.value = '{v}'; }}"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A field of umas by costume, `speed` marking an edit.
+    fn field(umas: &[(i32, i32)]) -> RaceInput {
+        RaceInput { horses: umas.iter().map(|&(card_id, speed)| HorseInput { card_id, speed, ..Default::default() }).collect(), ..Default::default() }
+    }
+
+    #[test]
+    fn pairing_follows_umas() {
+        let base = field(&[(1, 0), (2, 0), (3, 0)]);
+        // Added at the end, removed from the middle, duplicated, costume changed in place.
+        assert_eq!(pairing(&base, &field(&[(1, 0), (2, 0), (3, 0), (4, 0)])), [Some(0), Some(1), Some(2), None]);
+        assert_eq!(pairing(&base, &field(&[(1, 0), (3, 0)])), [Some(0), Some(2)]);
+        assert_eq!(pairing(&base, &field(&[(1, 0), (2, 0), (2, 0), (3, 0)])), [Some(0), Some(1), None, Some(2)]);
+        assert_eq!(pairing(&base, &field(&[(1, 0), (5, 0), (3, 0)])), [Some(0), Some(1), Some(2)]);
+        // Removed one of two of the same costume: the other keeps its pair (unchanged beats same costume).
+        let twins = field(&[(1, 10), (1, 20)]);
+        assert_eq!(pairing(&twins, &field(&[(1, 20)])), [Some(1)]);
+        // Removed and added: the rest pair, the new one doesn't take the removed one's place.
+        assert_eq!(pairing(&base, &field(&[(1, 0), (3, 0), (4, 0)])), [Some(0), Some(2), None]);
+        assert!(has_edits(Some(&base), &field(&[(1, 0), (2, 0), (3, 0), (4, 0)])));
+        assert!(!has_edits(Some(&base), &base));
+    }
 }

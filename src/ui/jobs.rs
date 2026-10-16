@@ -51,13 +51,13 @@ pub(super) fn use_busy(s: S) -> Memo<bool> {
     use_memo(move || s.job.read().is_some())
 }
 
-/// The setup a detail subtab measures batch uma `i` on: the current one (so Calculate follows edits since the batch),
-/// while its uma `i` is still the batch's.
+/// The field a detail subtab measures batch uma `i` on: the current setup as it runs (so Calculate follows edits since
+/// the batch; NPCs in the empty gates when the setup fills them), while its uma `i` is still the batch's.
 pub(super) fn setup_for(s: S, i: usize) -> Option<RaceInput> {
     let res = s.res.read();
     let r = res.as_ref().filter(|r| matches!(r.kind, Kind::Batch { .. }))?;
-    let input = s.input.read();
-    (input.horses.get(i)?.card_id == r.input.horses.get(i)?.card_id).then(|| input.clone())
+    let (input, race) = (s.input.read(), s.race.cloned()?);
+    (input.horses.get(i)?.card_id == r.input.horses.get(i)?.card_id).then(|| setup::filled(s, &race, &input))
 }
 
 /// Results (run at setup `rev()`) are older than the setup. Memoised, so readers don't re-render on every edit.

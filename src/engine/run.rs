@@ -11,6 +11,12 @@ pub struct Activation {
     pub time: f32,
     /// Activating horse's distance at that time (interpolated from frames).
     pub distance: f32,
+    /// When its effect ended (s) and her distance then, capped at the goal, as the sim ran it (`skill_spans`: extended
+    /// or stopped early, the finish stops every skill). `time` / `distance` for a skill without a lasting effect.
+    pub end_time: f32,
+    pub end: f32,
+    /// A passive skill, in effect the whole race.
+    pub passive: bool,
     /// Horses it targeted: bit `g` = horse (gate) `g`.
     pub targets: u32,
 }
@@ -218,12 +224,18 @@ pub(super) fn finish_run(mut r: sim_race::Race) -> Run {
     let activations: Vec<Activation> = out
         .events
         .iter()
-        // Skill event params: [horse, skill id, .., .., target flags].
+        // Skill event params: [horse, skill id, continue time, detail, target flags].
         .filter(|e| e.kind == event_kind::SKILL && e.params.len() >= 2 && (e.params[0] as usize) < n)
         .map(|e| {
             let horse = e.params[0] as usize;
+            let (id, detail) = (e.params[1], e.params.get(3).copied().unwrap_or(0));
             let targets = e.params.get(4).map_or(0, |&t| t as u32);
-            Activation { horse, skill_id: e.params[1], time: e.time, distance: distance_at(frames, horse, e.time), targets }
+            let span = out.skill_spans.iter().find(|s| s.horse == horse && s.skill_id == id && s.detail == detail && s.start == e.time);
+            let finish = out.results[horse].finish_time_raw;
+            let end_time = span.map_or(e.time, |s| s.end.unwrap_or(finish));
+            let distance = distance_at(frames, horse, e.time);
+            let end = distance_at(frames, horse, end_time).min(goal).max(distance);
+            Activation { horse, skill_id: id, time: e.time, distance, end_time, end, passive: span.is_some_and(|s| s.infinite), targets }
         })
         .collect();
     for a in &activations {
@@ -370,8 +382,13 @@ fn frame_at(frames: &[Frame], h: usize, t: f32, field: impl Fn(&HorseFrame) -> f
 /// Paired gain of run `a` over run `b` for horse `h`, in lengths (2.5 m): `h`'s distance gap at the moment the faster
 /// of the two crosses the goal. Positive = `a` ahead. (`skill_gains`, `diff_runs`; `diff_batches` approximates it.)
 pub(super) fn gap_lengths(fa: &[Frame], fb: &[Frame], h: usize, goal: f32) -> f32 {
-    let t = cross_time(fa, h, goal).min(cross_time(fb, h, goal));
-    (distance_at(fa, h, t) - distance_at(fb, h, t)) / 2.5
+    gap_lengths_of(fa, h, fb, h, goal)
+}
+
+/// `gap_lengths` of horse `ha` in `fa` vs horse `hb` in `fb` (the same uma at different gates).
+pub(super) fn gap_lengths_of(fa: &[Frame], ha: usize, fb: &[Frame], hb: usize, goal: f32) -> f32 {
+    let t = cross_time(fa, ha, goal).min(cross_time(fb, hb, goal));
+    (distance_at(fa, ha, t) - distance_at(fb, hb, t)) / 2.5
 }
 
 /// Time horse `h` first reached distance `d`, linear between frames (distances never decrease); ∞ if never.

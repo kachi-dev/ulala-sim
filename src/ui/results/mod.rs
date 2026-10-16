@@ -62,7 +62,7 @@ fn who(res: &Res, names: &[String], i: usize) -> Element {
             div {
                 b { "{names[i]}" }
                 span { class: "gate", "#{i + 1}" }
-                if res.ed_mask.get(i) == Some(&true) { span { class: "tag", "edited" } }
+                if res.ed_mask.get(i) == Some(&true) { span { class: "tag", if res.base_of(i).is_some() { "edited" } else { "new" } } }
                 // Tags share the second line with the trainer, keeping the column narrow.
                 div { class: "muted small row2", {team_tags(&res.input, res.player, i)} if let Some(t) = sub { " {t}" } }
             }

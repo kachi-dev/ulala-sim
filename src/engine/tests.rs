@@ -28,6 +28,9 @@ fn custom_race() {
         let run = run_once(&race, &race.input);
         assert_eq!(run.horses.len(), n);
         assert!(run.horses.iter().all(|h| h.finish_time > 60.0 && h.finish_time < 200.0)); // default course: Tokyo dirt 1600m (~96 s)
+        // Skill effects end where the sim stopped them: after they start, by the goal; timed ones cover some ground.
+        assert!(run.activations.iter().all(|a| a.end >= a.distance && a.end <= run.goal && a.end_time >= a.time));
+        assert!(run.activations.iter().any(|a| !a.passive && a.end > a.distance + 10.0));
     }
     let mut pop: Vec<i32> = custom_popularity(&race.input).horses.iter().map(|h| h.popularity).collect();
     pop.sort();

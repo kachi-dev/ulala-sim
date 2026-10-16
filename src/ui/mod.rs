@@ -90,10 +90,20 @@ struct Res {
     /// Per-horse colours (team hues or gate colours) and the save owner's horse, as of the run.
     colors: Arc<Vec<String>>,
     player: Option<usize>,
-    /// Per horse: differs from the baseline (only meaningful when `base` is Some).
+    /// Per horse: differs from the baseline or added since (only meaningful when `base` is Some).
     ed_mask: Vec<bool>,
+    /// Per horse: the baseline run's horse it is (None: added since, or no baseline), and the baseline's field.
+    pairs: Vec<Option<usize>>,
+    base_input: Option<Arc<RaceInput>>,
     cv: Arc<CourseView>,
     rev: u64,
+}
+
+impl Res {
+    /// The baseline run's horse paired with horse `i` (None: added since, or no baseline).
+    fn base_of(&self, i: usize) -> Option<usize> {
+        self.pairs.get(i).copied().flatten()
+    }
 }
 
 #[derive(Clone)]
@@ -519,15 +529,36 @@ const SPLIT_JS: &str = r#"
     d.addEventListener('pointermove', move); d.addEventListener('pointerup', up);
   });
   document.addEventListener('dblclick', e => { if (e.target.closest && e.target.closest('.hdivider')) { try { localStorage.removeItem(TKEY); } catch {} applyT(null); } });
+  // When the course chart grows past its row (more state rows, a taller field), grow the row to show all of it, up
+  // to 70% of the column; dragging still sets it until the chart grows again. Not saved.
+  const fitT = () => { const r = document.getElementById('right'), t = document.getElementById('topchart'); if (!r || !t) return;
+    const cs = getComputedStyle(t);
+    const need = [...t.children].reduce((h, c) => h + c.getBoundingClientRect().height, 0) + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    if (need > t.clientHeight + 1) r.style.setProperty('--top-h', Math.min(r.clientHeight * 0.7, need) + 'px'); };
+  const ro = new ResizeObserver(fitT);
+  let watched = null;
+  setInterval(() => { const t = document.getElementById('topchart'); if (!t) return;
+    const kids = [...t.children];
+    if (watched && watched.length === kids.length && kids.every((c, i) => c === watched[i])) return;
+    ro.disconnect(); kids.forEach(c => ro.observe(c)); watched = kids; fitT(); }, 500);
   // Subtab switch: hold the pane's scroll bottom so a shorter tab can't pull the page up; the hold
-  // follows the view back up as you scroll and goes once the real content reaches it.
+  // follows the view back up as you scroll and goes once the real content reaches it. Only your own
+  // scrolling moves it (a wheel, key, touch or scrollbar drag in the last second): scroll events the
+  // page causes itself would otherwise walk it up to the content.
   const bottom = p => p.scrollTop + p.clientHeight;
+  let userAt = -1e9;
+  const user = () => userAt = performance.now();
+  for (const t of ['wheel', 'keydown', 'touchmove', 'pointerdown']) document.addEventListener(t, user, { capture: true, passive: true });
+  document.addEventListener('pointermove', e => { if (e.buttons) user(); }, { capture: true, passive: true });
+  // --hold is the bottom to keep (the spacer ends there); switching again keeps it, never lowers it.
+  const held = p => parseFloat(p.style.getPropertyValue('--hold')) || 0;
   document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('.dtabs button'), p = b && b.closest('.pane');
-    if (p) p.style.setProperty('--hold', bottom(p) - 1 + 'px'); }, true);
+    if (p) { p.style.setProperty('--hold', Math.max(bottom(p), held(p)) + 'px'); userAt = -1e9; } }, true);
   document.addEventListener('scroll', e => { const p = e.target; if (!p.classList || !p.classList.contains('pane') || !p.style.getPropertyValue('--hold')) return;
+    if (performance.now() - userAt > 1000) return;
     const last = p.lastElementChild, natural = last ? last.offsetTop + last.offsetHeight : 0;
     if (bottom(p) <= natural) p.style.removeProperty('--hold');
-    else if (bottom(p) - 1 < parseFloat(p.style.getPropertyValue('--hold'))) p.style.setProperty('--hold', bottom(p) - 1 + 'px'); }, true);
+    else if (bottom(p) < held(p)) p.style.setProperty('--hold', bottom(p) + 'px'); }, true);
 })();
 "#;
 
