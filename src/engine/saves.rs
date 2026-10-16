@@ -20,6 +20,22 @@ pub struct SaveEntry {
     pub date: String,
 }
 
+/// A save's entry from its path: category = its folder; winner, time and date from horseACT's file name
+/// ("<Winner>-<time>s-<YYYYMMDD>"; else the whole name is the winner).
+pub fn save_entry(path: &Path) -> SaveEntry {
+    let category = path.parent().and_then(|p| p.file_name()).map_or(String::new(), |s| s.to_string_lossy().into());
+    let stem = path.file_stem().map_or(String::new(), |s| s.to_string_lossy().into());
+    // The winner may contain '-'.
+    let parts: Vec<&str> = stem.rsplitn(3, '-').collect();
+    let (winner, time, date) = match parts[..] {
+        [d, t, w] if d.len() == 8 && d.bytes().all(|b| b.is_ascii_digit()) && t.ends_with('s') => {
+            (w.to_string(), t.to_string(), format!("{}-{}-{}", &d[..4], &d[4..6], &d[6..]))
+        }
+        _ => (stem.clone(), String::new(), String::new()),
+    };
+    SaveEntry { path: path.to_path_buf(), category, winner, time, date }
+}
+
 /// All `*.json` saves under `dir/*/`, newest date first.
 pub fn list_saves(dir: &Path) -> Vec<SaveEntry> {
     let ls = |d: &Path| std::fs::read_dir(d).into_iter().flatten().flatten().map(|e| e.path());
@@ -27,19 +43,7 @@ pub fn list_saves(dir: &Path) -> Vec<SaveEntry> {
         .filter(|d| d.is_dir())
         .flat_map(|d| ls(&d).collect::<Vec<_>>())
         .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("json")))
-        .map(|path| {
-            let category = path.parent().and_then(|p| p.file_name()).map_or(String::new(), |s| s.to_string_lossy().into());
-            let stem = path.file_stem().map_or(String::new(), |s| s.to_string_lossy().into());
-            // "<Winner>-<time>s-<YYYYMMDD>"; the winner may contain '-'.
-            let parts: Vec<&str> = stem.rsplitn(3, '-').collect();
-            let (winner, time, date) = match parts[..] {
-                [d, t, w] if d.len() == 8 && d.bytes().all(|b| b.is_ascii_digit()) && t.ends_with('s') => {
-                    (w.to_string(), t.to_string(), format!("{}-{}-{}", &d[..4], &d[4..6], &d[6..]))
-                }
-                _ => (stem.clone(), String::new(), String::new()),
-            };
-            SaveEntry { path, category, winner, time, date }
-        })
+        .map(|p| save_entry(&p))
         .collect();
     v.sort_by(|a, b| b.date.cmp(&a.date));
     v
@@ -123,6 +127,12 @@ pub(super) struct HeadHorseData {
     trained_chara_id: i32,
     #[serde(default)]
     running_style: i32,
+}
+
+/// "Tokyo Dirt 1600m" for raceCourseSet `id` with the current data ("" when unknown).
+pub fn course_label(id: i32) -> String {
+    let data = game_data(DataEra::current()).ok();
+    data.filter(|d| d.master.race_course_set.contains_key(&id)).map_or(String::new(), |d| course_info(&d, id).label())
 }
 
 /// `SaveMeta` for every save, reported through `each(index, meta)` as they come (cached ones first). The cache is

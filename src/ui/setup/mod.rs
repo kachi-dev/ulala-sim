@@ -19,6 +19,7 @@ pub(super) use run::filled;
 #[component]
 pub fn SetupTab() -> Element {
     rsx! {
+        crate::ui::saves::RaceHeader {}
         CourseCard {}
         FieldCard {}
         RunBar {}

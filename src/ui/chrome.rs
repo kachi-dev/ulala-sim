@@ -1,5 +1,5 @@
 //! Custom window chrome and app header: the window is undecorated (main.rs, chrome_win.rs), so this 40px strip
-//! holds the logo, the race context (also the drag area), Races, theme, options, the window buttons, and the
+//! holds the logo, the race context (also the drag area), theme, options, the window buttons, and the
 //! invisible resize edges.
 
 use super::*;
@@ -115,9 +115,6 @@ pub fn TitleBar() -> Element {
                     }
                 },
                 if ready { setup::RaceContext {} } else { span { class: "tb-title", "Ulala" } }
-            }
-            if ready {
-                button { class: "btn ghost tb-races", title: "Open a saved race (Ctrl+O)", onclick: move |_| open_saves(s), "Races" }
             }
             div { class: "tb-tools",
                 if let Some(v) = update() {

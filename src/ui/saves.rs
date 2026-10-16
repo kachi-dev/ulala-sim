@@ -1,4 +1,5 @@
-//! Saved races: the Races modal and the background course index behind its search.
+//! Saved races and setups: the Races modal (horseACT's saved races, or the setups saved by name), the Save setup
+//! dialog, and the background course index behind the races search.
 
 use super::*;
 use std::rc::Rc;
@@ -35,10 +36,195 @@ pub(super) fn index_in_background(s: S, saves: Vec<SaveEntry>) {
     });
 }
 
-/// Opens the Races modal, picking up races saved since the list was read.
+/// Opens the Races modal, picking up races and setups saved since the lists were read.
 pub(super) fn open_saves(mut s: S) {
     refresh_saves(s);
+    s.setups.set(list_setups());
     s.saves_open.set(true);
+}
+
+/// What the save dialog does.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum SaveMode {
+    /// Save under a name (the first save, or Save as…).
+    New,
+    /// Give the saved race being worked on a new name.
+    Rename,
+}
+
+/// Saves the current setup as `name` (replacing a saved race of that name); `rename` = the file it was saved as, gone
+/// once it's saved under the new name.
+fn save_setup(mut s: S, name: &str, rename: Option<PathBuf>) {
+    let Some(path) = setup_path(name) else { return };
+    let source = s.race.peek().as_ref().and_then(|r| r.path.clone());
+    let (input, trainers, baseline, npcs) = (s.input.peek(), s.trainers.peek(), s.baseline.peek(), s.npcs.peek());
+    let cm = cm_preset_of(&input).map(|i| (cm_presets()[i].id, cm_presets()[i].name.clone()));
+    let r = write_setup(&path, name, source.as_deref(), &input, &trainers, baseline.as_deref(), *s.field_size.peek(), &npcs, cm);
+    drop((input, trainers, baseline, npcs));
+    match r {
+        Ok(()) => {
+            if let Some(old) = rename.filter(|o| *o != path) {
+                let _ = std::fs::remove_file(old);
+            }
+            s.saved_race.set(read_setup(&path));
+            s.setups.set(list_setups());
+            s.save_open.set(None);
+        }
+        Err(e) => s.err.set(Some(e)),
+    }
+}
+
+/// Save (Ctrl+S): back into the saved race being worked on; else asks for a name.
+pub(super) fn quick_save(mut s: S) {
+    if s.race.peek().is_none() {
+        return;
+    }
+    match s.saved_race.cloned() {
+        Some(st) => save_setup(s, &st.name, None),
+        None => s.save_open.set(Some(SaveMode::New)),
+    }
+}
+
+/// The setup differs from saved race `st`: conditions, seed, umas, field size, NPCs or the pinned baseline.
+fn race_edited(s: S, st: &SavedSetup) -> bool {
+    let (input, base) = (s.input.read(), s.baseline.read());
+    let base_differs = match (&st.baseline, base.as_deref()) {
+        (Some(a), Some(b)) => differs(a, b),
+        (a, b) => a.is_some() != b.is_some(),
+    };
+    differs(&st.input, &input) || st.field_size != *s.field_size.read() || st.npcs != *s.npcs.read() || base_differs
+}
+
+/// The save dialog: Save race / Save as / Rename, the current setup (course, conditions, CM preset, seed, umas, NPCs,
+/// field size and the pinned baseline) under a name, listed in Load race > My races.
+#[component]
+pub(super) fn SaveSetupModal() -> Element {
+    let mut s = use_context::<S>();
+    let mut name = use_signal(String::new);
+    // Each opening starts from the saved race's name, else the race's title.
+    use_effect(move || {
+        if s.save_open.read().is_some() {
+            let race = s.race.peek().clone();
+            let n = s.saved_race.peek().as_ref().map(|st| st.name.clone()).or_else(|| race.map(|r| race_title(&r, &s.input.peek())));
+            name.set(n.unwrap_or_default());
+        }
+    });
+    let Some(mode) = *s.save_open.read() else { return rsx! {} };
+    let Some(race) = s.race.cloned() else { return rsx! {} };
+    let input = s.input.read();
+    let n = name.read().trim().to_string();
+    let path = setup_path(&n);
+    let renaming = s.saved_race.read().as_ref().filter(|_| mode == SaveMode::Rename).map(|st| st.path.clone());
+    // Saving over another saved race (renaming to its own name isn't).
+    let exists = path.as_ref().is_some_and(|p| p.exists() && renaming.as_ref() != Some(p));
+    let (umas, size) = (input.horses.len(), *s.field_size.read());
+    let npcs = if s.npcs.read().fill { size.saturating_sub(umas) } else { 0 };
+    let field = if npcs > 0 { format!("{umas} umas + {npcs} NPCs") } else { format!("{umas} umas") };
+    let base = if s.baseline.read().is_some() { " · baseline pinned" } else { "" };
+    let (title, course) = (race_title(&race, &input), course_label(input.course_set_id));
+    let at = if title == course || course.is_empty() { title } else { format!("{title}, {course}") };
+    let summary = format!("{at} · {field} · seed {}{base}", input.random_seed);
+    let ok = path.is_some();
+    let heading = match (mode, s.saved_race.read().is_some()) {
+        (SaveMode::Rename, _) => "Rename race",
+        (SaveMode::New, true) => "Save as",
+        _ => "Save race",
+    };
+    let go = move || save_setup(s, &name.peek(), renaming.clone());
+    let go2 = go.clone();
+    rsx! {
+        div { class: "scrim top", onclick: move |_| s.save_open.set(None) }
+        div { class: "modal notice save-setup",
+            h3 { "{heading}" }
+            p { class: "muted small", "The course, conditions, seed, umas, NPCs and pinned baseline, kept under a name in Load race > My races." }
+            label { class: "field",
+                span { "Name" }
+                input {
+                    id: "setup-name",
+                    autofocus: true,
+                    value: "{name}",
+                    oninput: move |e| name.set(e.value()),
+                    onkeydown: move |e| {
+                        if e.key() == Key::Enter && setup_path(&name.peek()).is_some() {
+                            go2();
+                        }
+                    },
+                }
+            }
+            p { class: "small", "{summary}" }
+            if exists {
+                p { class: "warn", "A race named “{n}” is saved: saving replaces it." }
+            }
+            div { class: "btns",
+                button { class: "btn ghost", onclick: move |_| s.save_open.set(None), "Cancel" }
+                button {
+                    class: "btn",
+                    disabled: !ok,
+                    onclick: move |_| go(),
+                    if mode == SaveMode::Rename { "Rename" } else if exists { "Replace" } else { "Save" }
+                }
+            }
+        }
+    }
+}
+
+/// Top of the setup pane: which race this is (a saved race, a replay or a custom race), whether it changed since, and
+/// Save / Save as / Rename / Load race.
+#[component]
+pub(super) fn RaceHeader() -> Element {
+    let mut s = use_context::<S>();
+    let mut menu = use_signal(|| false);
+    let Some(race) = s.race.cloned() else { return rsx! {} };
+    let saved = s.saved_race.cloned();
+    let input = s.input.read();
+    let cm = cm_preset_of(&input).map(|i| format!("CM {} {}", cm_presets()[i].id, cm_presets()[i].name));
+    // (name, what it is, when, edited since)
+    let (name, kind, when, edited) = match (&saved, &race.path) {
+        (Some(st), _) => (st.name.clone(), "My race".to_string(), format!("saved {}", st.date), race_edited(s, st)),
+        (None, Some(p)) => {
+            let e = save_entry(p);
+            let t = e.time.trim_end_matches('s').parse::<f32>().map(ft).unwrap_or_default();
+            let name = if t.is_empty() { e.winner } else { format!("{}, {t}", e.winner) };
+            (name, format!("Replay · {}", e.category), format!("raced {}", date(&race.date)), differs(&race.input, &input))
+        }
+        (None, None) => ("Custom race".to_string(), "Not saved".to_string(), String::new(), false),
+    };
+    let sub: Vec<String> = [Some(kind), cm, (!when.is_empty()).then_some(when)].into_iter().flatten().collect();
+    let sub = sub.join(" · ");
+    let can_rename = saved.is_some();
+    rsx! {
+        section { class: "card race-head",
+            div { class: "rh-main",
+                div { class: "rh-name",
+                    b { title: "{name}", "{name}" }
+                    if edited { span { class: "chip edited", title: "Changed since it was saved", "edited" } }
+                }
+                div { class: "muted small rh-sub", title: "{sub}", "{sub}" }
+            }
+            div { class: "rh-acts",
+                div { class: "savebtn", onmouseleave: move |_| menu.set(false),
+                    button { class: "btn", title: if can_rename { "Save over “{name}” (Ctrl+S)" } else { "Save under a name (Ctrl+S)" }, onclick: move |_| quick_save(s), "Save" }
+                    button { class: "btn caret", title: "Save as, rename", onclick: move |_| menu.toggle(), {icon("down")} }
+                    if menu() {
+                        div { class: "menu",
+                            button { onclick: move |_| { menu.set(false); s.save_open.set(Some(SaveMode::New)); }, "Save as…" }
+                            if can_rename {
+                                button { onclick: move |_| { menu.set(false); s.save_open.set(Some(SaveMode::Rename)); }, "Rename…" }
+                            }
+                        }
+                    }
+                }
+                button { class: "btn alt", title: "Load a saved race or a replay (Ctrl+O)", onclick: move |_| open_saves(s), "Load race" }
+            }
+        }
+    }
+}
+
+/// What the search matches in a saved race: its name, course, CM and uma names.
+fn setup_text(st: &SavedSetup, course: &str) -> String {
+    let umas: Vec<String> = st.input.horses.iter().map(horse_name).collect();
+    let cm = st.cm.as_ref().map_or(String::new(), |(id, name)| format!("CM {id} {name}"));
+    format!("{} {course} {cm} {}", st.name, umas.join(" ")).to_lowercase()
 }
 
 /// Re-reads the saves folder.
@@ -111,10 +297,14 @@ pub(super) fn SavesModal() -> Element {
     // Winner name → a chara id for the icon (the file name only carries the name).
     let ids = use_hook(|| Rc::new(cards().iter().map(|c| (c.name.as_str(), c.chara_id)).collect::<HashMap<_, _>>()));
     let running = use_busy(s);
+    // The setup whose Delete was clicked, asking to confirm.
+    let mut del = use_signal(|| None::<PathBuf>);
     if !*s.saves_open.read() {
         return rsx! {};
     }
+    let mine = *s.saves_setups.read();
     let saves = s.saves.read();
+    let setups = s.setups.read();
     let mut cats: Vec<&str> = saves.iter().map(|e| e.category.as_str()).collect();
     cats.sort();
     cats.dedup();
@@ -132,40 +322,25 @@ pub(super) fn SavesModal() -> Element {
         .filter(|e| cm_v == 0 || cm_of(e).is_some_and(|p| p.id == cm_v))
         .filter(|e| e.winner.to_lowercase().contains(&ql) || meta.get(&e.path).is_some_and(|m| m.course.to_lowercase().contains(&ql)))
         .collect();
+    let mine_hits: Vec<(&SavedSetup, String)> =
+        setups.iter().map(|st| (st, course_label(st.input.course_set_id))).filter(|(st, c)| setup_text(st, c).contains(&ql)).collect();
+    let n_mine = mine_hits.len();
     let cur = s.race.read().as_ref().and_then(|r| r.path.clone());
+    let cur_setup = s.saved_race.read().as_ref().map(|st| st.path.clone());
     let total = hits.len();
     let time = |t: &str| t.trim_end_matches('s').parse::<f32>().map(ft).unwrap_or_else(|_| t.to_string());
     let q = s.saves_q.cloned();
+    let npcs_of = |st: &SavedSetup| if st.npcs.fill { st.field_size.saturating_sub(st.input.horses.len()) } else { 0 };
     rsx! {
         div { class: "scrim", onclick: move |_| s.saves_open.set(false) }
         div { class: "modal races",
             div { class: "drawer-h",
-                h3 { "Races" }
-                input {
-                    r#type: "search",
-                    placeholder: "Search by winner or course…",
-                    autofocus: true,
-                    value: "{q}",
-                    oninput: move |e| s.saves_q.set(e.value()),
+                h3 { "Load race" }
+                div { class: "seg",
+                    button { class: if !mine { "on" }, onclick: move |_| s.saves_setups.set(false), "Replays " span { class: "n", "{thousands(saves.len())}" } }
+                    button { class: if mine { "on" }, onclick: move |_| s.saves_setups.set(true), "My races " span { class: "n", "{setups.len()}" } }
                 }
-                select {
-                    onchange: move |e| {
-                        s.saves_cat.set(e.value());
-                        s.saves_cm.set(0);
-                    },
-                    option { value: "", "All categories" }
-                    for c in cats {
-                        option { value: "{c}", selected: c == cat_v, "{c}" }
-                    }
-                }
-                if !cms.is_empty() {
-                    select { onchange: move |e| s.saves_cm.set(e.value().parse().unwrap_or(0)),
-                        option { value: "0", "All CMs" }
-                        for p in cms {
-                            option { value: "{p.id}", selected: p.id == cm_v, "CM {p.id} - {p.name}" }
-                        }
-                    }
-                }
+                div { class: "grow" }
                 label { class: "btn alt open",
                     "Open a file…"
                     input {
@@ -190,71 +365,185 @@ pub(super) fn SavesModal() -> Element {
                 }
                 button { class: "btn icon", title: "Close (Esc)", onclick: move |_| s.saves_open.set(false), {icon("x")} }
             }
-            div { class: "races-sub muted small",
-                if total > LIST_CAP { "Newest {LIST_CAP} of {thousands(total)} saves" } else { "{total} saves" }
-                if indexed < saves.len() { " · reading courses: {thousands(indexed)} of {thousands(saves.len())}…" }
-            }
-            SetupHint { heading: false }
-            if total == 0 {
-                p { class: "muted races-empty", "No saved races here. You can still open any race file, or drop one on the window." }
-            }
-            div { class: "races-list",
-                table { class: "grid saves",
-                    thead {
-                        tr {
-                            th { "Winner" }
-                            th { class: "num", "Time" }
-                            th { "Course" }
-                            th { "Your uma" }
-                            th { "Category" }
-                            th { "Date" }
+            div { class: "races-filters",
+                input {
+                    r#type: "search",
+                    placeholder: if mine { "Search by name, course, CM or uma…" } else { "Search by winner or course…" },
+                    autofocus: true,
+                    value: "{q}",
+                    oninput: move |e| s.saves_q.set(e.value()),
+                }
+                if !mine {
+                    select {
+                        onchange: move |e| {
+                            s.saves_cat.set(e.value());
+                            s.saves_cm.set(0);
+                        },
+                        option { value: "", "All categories" }
+                        for c in cats {
+                            option { value: "{c}", selected: c == cat_v, "{c}" }
                         }
                     }
-                    tbody {
-                        for e in hits.into_iter().take(LIST_CAP) {
+                    if !cms.is_empty() {
+                        select { onchange: move |e| s.saves_cm.set(e.value().parse().unwrap_or(0)),
+                            option { value: "0", "All CMs" }
+                            for p in cms {
+                                option { value: "{p.id}", selected: p.id == cm_v, "CM {p.id} - {p.name}" }
+                            }
+                        }
+                    }
+                }
+                div { class: "grow" }
+                span { class: "muted small",
+                    if mine {
+                        "{n_mine} race" if n_mine != 1 { "s" }
+                    } else {
+                        if total > LIST_CAP { "Newest {LIST_CAP} of {thousands(total)} replays" } else { "{total} replays" }
+                        if indexed < saves.len() { " · reading courses: {thousands(indexed)} of {thousands(saves.len())}…" }
+                    }
+                }
+            }
+            if mine {
+                if setups.is_empty() {
+                    p { class: "muted races-empty", "No saved races yet. Save Race (next to Load Race) keeps the current course, umas and NPCs under a name, to come back to here." }
+                }
+                div { class: "races-list", hidden: n_mine == 0,
+                    table { class: "grid saves",
+                        thead {
                             tr {
-                                key: "{e.path.display()}",
-                                class: if cur.as_ref() == Some(&e.path) { "sel" },
-                                title: "{e.path.display()}",
-                                onclick: {
-                                    let p = e.path.clone();
-                                    move |_| open(s, p.clone())
-                                },
+                                th { "Race" }
+                                th { "Course" }
+                                th { "Umas" }
+                                th { class: "num", "NPCs" }
+                                th { class: "num", "Seed" }
+                                th { "Saved" }
+                                th {}
+                            }
+                        }
+                        tbody {
+                            for (st, course) in mine_hits {
                                 {
-                                    let m = meta.get(&e.path);
-                                    // Before the save is indexed: the chara from the winner's name in the file name.
-                                    let (card, chara) = m.map(|m| m.winner).filter(|w| w.1 != 0).or_else(|| ids.get(e.winner.as_str()).map(|&id| (0, id))).unwrap_or_default();
+                                    let (p, open_st) = (st.path.clone(), st.clone());
+                                    let asking = del.read().as_ref() == Some(&st.path);
+                                    let n_npc = npcs_of(st);
                                     rsx! {
-                                        td { class: "who",
-                                            div { class: "whobox",
-                                                if chara != 0 { {uma_icon(card, chara, None, "sm")} }
-                                                div {
-                                                    b { "{e.winner}" }
-                                                    if card != 0 { div { class: "muted small", "{card_title(card)}" } }
+                                        tr {
+                                            key: "{st.path.display()}",
+                                            class: if cur_setup.as_ref() == Some(&st.path) { "sel" },
+                                            title: "{st.path.display()}",
+                                            onclick: move |_| open_setup(s, open_st.clone()),
+                                            td {
+                                                b { "{st.name}" }
+                                                div { class: "muted small", if st.source.is_some() { "On a replay" } else { "Custom race" } }
+                                            }
+                                            td {
+                                                span { class: "muted", "{course}" }
+                                                if let Some((id, name)) = &st.cm { div { class: "muted small", "CM {id} - {name}" } }
+                                            }
+                                            td { class: "who",
+                                                div { class: "whobox mobs",
+                                                    for h in st.input.horses.iter().take(9) { {horse_icon(h, None, "sm")} }
+                                                    if st.input.horses.len() > 9 { span { class: "muted small", "+{st.input.horses.len() - 9}" } }
                                                 }
                                             }
-                                        }
-                                        td { class: "num", "{time(&e.time)}" }
-                                        td { class: "muted", "{m.map(|m| m.course.as_str()).unwrap_or(\"\")}" }
-                                        td { class: "who",
-                                            if let Some(m) = m.filter(|m| !m.team.is_empty()) {
-                                                div { class: "whobox",
-                                                    for t in &m.team { {uma_icon(t.card, t.chara, None, "sm")} }
-                                                    div {
-                                                        if let [t] = &m.team[..] { b { "{chara_name(t.chara)}" } }
-                                                        if m.won { span { class: "you", "Won" } }
-                                                        if !m.player_trainer.is_empty() { div { class: "muted small", "{m.player_trainer}" } }
+                                            td { class: "num", if n_npc > 0 { "{n_npc}" } else { span { class: "muted", "-" } } }
+                                            td { class: "num muted", "{st.input.random_seed}" }
+                                            td { class: "muted", "{st.date}" }
+                                            td { class: "acts",
+                                                onclick: move |e| e.stop_propagation(),
+                                                if asking {
+                                                    span { class: "small", "Delete? " }
+                                                    button {
+                                                        class: "btn small danger",
+                                                        onclick: {
+                                                            let p = p.clone();
+                                                            move |_| {
+                                                                let _ = std::fs::remove_file(&p);
+                                                                // Deleting the saved race being worked on: it's no longer one.
+                                                                if s.saved_race.peek().as_ref().is_some_and(|st| st.path == p) {
+                                                                    s.saved_race.set(None);
+                                                                }
+                                                                del.set(None);
+                                                                s.setups.set(list_setups());
+                                                            }
+                                                        },
+                                                        "Delete"
                                                     }
+                                                    button { class: "btn small ghost", onclick: move |_| del.set(None), "Keep" }
+                                                } else {
+                                                    button { class: "btn icon", title: "Delete this saved race", onclick: move |_| del.set(Some(p.clone())), {icon("trash")} }
                                                 }
                                             }
                                         }
                                     }
                                 }
-                                td {
-                                    span { class: "cat", "{e.category}" }
-                                    if let Some(p) = cm_of(e) { div { class: "muted small", "CM {p.id} - {p.name}" } }
+                            }
+                        }
+                    }
+                }
+            } else {
+                SetupHint { heading: false }
+                if total == 0 {
+                    p { class: "muted races-empty", "No saved races here. You can still open any race file, or drop one on the window." }
+                }
+                div { class: "races-list",
+                    table { class: "grid saves",
+                        thead {
+                            tr {
+                                th { "Winner" }
+                                th { class: "num", "Time" }
+                                th { "Course" }
+                                th { "Your uma" }
+                                th { "Category" }
+                                th { "Date" }
+                            }
+                        }
+                        tbody {
+                            for e in hits.into_iter().take(LIST_CAP) {
+                                tr {
+                                    key: "{e.path.display()}",
+                                    class: if cur.as_ref() == Some(&e.path) { "sel" },
+                                    title: "{e.path.display()}",
+                                    onclick: {
+                                        let p = e.path.clone();
+                                        move |_| open(s, p.clone())
+                                    },
+                                    {
+                                        let m = meta.get(&e.path);
+                                        // Before the save is indexed: the chara from the winner's name in the file name.
+                                        let (card, chara) = m.map(|m| m.winner).filter(|w| w.1 != 0).or_else(|| ids.get(e.winner.as_str()).map(|&id| (0, id))).unwrap_or_default();
+                                        rsx! {
+                                            td { class: "who",
+                                                div { class: "whobox",
+                                                    if chara != 0 { {uma_icon(card, chara, None, "sm")} }
+                                                    div {
+                                                        b { "{e.winner}" }
+                                                        if card != 0 { div { class: "muted small", "{card_title(card)}" } }
+                                                    }
+                                                }
+                                            }
+                                            td { class: "num", "{time(&e.time)}" }
+                                            td { class: "muted", "{m.map(|m| m.course.as_str()).unwrap_or(\"\")}" }
+                                            td { class: "who",
+                                                if let Some(m) = m.filter(|m| !m.team.is_empty()) {
+                                                    div { class: "whobox",
+                                                        for t in &m.team { {uma_icon(t.card, t.chara, None, "sm")} }
+                                                        div {
+                                                            if let [t] = &m.team[..] { b { "{chara_name(t.chara)}" } }
+                                                            if m.won { span { class: "you", "Won" } }
+                                                            if !m.player_trainer.is_empty() { div { class: "muted small", "{m.player_trainer}" } }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    td {
+                                        span { class: "cat", "{e.category}" }
+                                        if let Some(p) = cm_of(e) { div { class: "muted small", "CM {p.id} - {p.name}" } }
+                                    }
+                                    td { class: "muted", "{e.date}" }
                                 }
-                                td { class: "muted", "{e.date}" }
                             }
                         }
                     }

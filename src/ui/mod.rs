@@ -195,6 +195,13 @@ struct S {
     saves_q: Signal<String>,
     /// Course / player info per save, filled in by a background scan (`index_saves`).
     meta: Signal<HashMap<PathBuf, SaveMeta>>,
+    /// The Races modal shows the setups saved by name (else the saved races), and those setups.
+    saves_setups: Signal<bool>,
+    setups: Signal<Vec<SavedSetup>>,
+    /// The Save setup dialog, and the name of the setup loaded or last saved (its default name).
+    save_open: Signal<Option<saves::SaveMode>>,
+    /// The saved race (Load race > My races) being worked on, as last saved or loaded.
+    saved_race: Signal<Option<SavedSetup>>,
     race: Signal<Option<Arc<Race>>>,
     skills: Signal<Arc<Vec<SkillInfo>>>,
     courses: Signal<Arc<Vec<CourseInfo>>>,
@@ -311,6 +318,10 @@ pub fn App() -> Element {
         saves_cm: use_signal(|| 0),
         saves_q: use_signal(String::new),
         meta: use_signal(HashMap::new),
+        saves_setups: use_signal(|| false),
+        setups: use_signal(Vec::new),
+        save_open: use_signal(|| None),
+        saved_race: use_signal(|| None),
         race: use_signal(|| None),
         skills: use_signal(Default::default),
         courses: use_signal(Default::default),
@@ -380,7 +391,8 @@ pub fn App() -> Element {
     use_effect(move || {
         let race = s.race.read();
         let Some(race) = race.as_ref() else { return };
-        save_session(race.path.as_deref(), &s.input.read(), &s.trainers.read(), s.baseline.read().as_deref(), *s.field_size.read());
+        let setup = s.saved_race.read().as_ref().map(|st| st.path.clone());
+        save_session(race.path.as_deref(), &s.input.read(), &s.trainers.read(), s.baseline.read().as_deref(), *s.field_size.read(), setup.as_deref());
     });
     // NPCs and field size change the race (empty gates take NPCs): runs before it are stale.
     use_effect(move || {
@@ -392,15 +404,18 @@ pub fn App() -> Element {
     // Ctrl+O opens the Races modal, Esc closes overlays (a page-level listener: focus may be anywhere, or nowhere).
     use_future(move || async move {
         let mut keys = document::eval(
-            "document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') { e.preventDefault(); dioxus.send(1); } else if (e.key === 'Escape') { dioxus.send(2); } }); await new Promise(() => {});",
+            "document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') { e.preventDefault(); dioxus.send(1); } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); dioxus.send(3); } else if (e.key === 'Escape') { dioxus.send(2); } }); await new Promise(() => {});",
         );
         let mut s = s;
         while let Ok(k) = keys.recv::<i32>().await {
             if k == 1 {
                 open_saves(s);
+            } else if k == 3 {
+                quick_save(s);
             } else {
                 // Esc closes whatever overlay is open.
                 s.saves_open.set(false);
+                s.save_open.set(None);
                 s.picker.set(false);
                 s.editing.set(None);
                 s.npc_open.set(false);
@@ -429,6 +444,7 @@ pub fn App() -> Element {
             setup::NpcDrawer {}
             setup::Picker {}
             SavesModal {}
+            SaveSetupModal {}
             NoHorseAct {}
             WhatsNew {}
             Toast {}

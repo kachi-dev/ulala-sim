@@ -31,6 +31,7 @@ fn install(mut s: S, (race, all, courses, cv): Loaded) {
     s.sel.set(0);
     s.r_res.set(None);
     s.r_sel.set(None);
+    s.saved_race.set(None);
     s.race.set(Some(race));
 }
 
@@ -59,11 +60,11 @@ pub(super) fn restore(s: S) {
                 let cv = Arc::new(course_view(&r.race, r.input.course_set_id));
                 // A save's server check isn't stored: run its seed again, as opening it does.
                 let v = r.race.path.is_some().then(|| verify_against_server(&r.race, &run_once(&r.race, &r.race.input)));
-                (prepare(r.race), r.input, r.trainers, r.baseline, r.field_size, cv, v)
+                (prepare(r.race), r.input, r.trainers, r.baseline, (r.field_size, r.setup), cv, v)
             })
         })
         .await;
-        let Ok((Some((l, input, trainers, baseline, field_size, cv, v)), _)) = r else { return new_custom(s) };
+        let Ok((Some((l, input, trainers, baseline, (field_size, setup), cv, v)), _)) = r else { return new_custom(s) };
         install(s, l);
         s.verify.set(v);
         let fs = if field_size > 0 { field_size } else { *s.field_size.peek() }.max(input.horses.len()).min(MAX_FIELD);
@@ -72,10 +73,43 @@ pub(super) fn restore(s: S) {
         s.trainers.set(trainers);
         s.baseline.set(baseline.map(Arc::new));
         s.cview.set(Some(cv));
+        s.saved_race.set(setup);
+    });
+}
+
+/// Opens a setup saved by name: its race (or a custom one when that save is gone) with the setup, trainer names,
+/// baseline, field size and NPCs as saved.
+pub(super) fn open_setup(mut s: S, setup: SavedSetup) {
+    if !claim(s) {
+        return s.err.set(Some("Busy: wait for the current run to finish, or cancel it.".into()));
+    }
+    s.saves_open.set(false);
+    s.left_open.set(true);
+    bg(s, async move {
+        let mut s = s;
+        let r = job(s, "Loading setup", 0, false, move |_| {
+            let race = setup_race(&setup);
+            let cv = Arc::new(course_view(&race, setup.input.course_set_id));
+            (prepare(race), setup, cv)
+        })
+        .await;
+        let Ok(((l, setup, cv), _)) = r else { return };
+        install(s, l);
+        s.npcs.set(setup.npcs);
+        s.field_size.set(setup.field_size.max(setup.input.horses.len()).clamp(FIELD_MIN, MAX_FIELD));
+        s.input.set(setup.input);
+        s.trainers.set(setup.trainers);
+        s.baseline.set(setup.baseline.map(Arc::new));
+        s.cview.set(Some(cv));
+        s.saved_race.set(read_setup(&setup.path));
     });
 }
 
 pub(super) fn open(mut s: S, path: PathBuf) {
+    // A setup saved by name opens as one (`Open a file…`, dropped on the window).
+    if let Some(setup) = read_setup(&path) {
+        return open_setup(s, setup);
+    }
     if !claim(s) {
         return s.err.set(Some("Busy: wait for the current run to finish, or cancel it.".into()));
     }

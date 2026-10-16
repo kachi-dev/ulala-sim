@@ -275,6 +275,7 @@ pub(super) fn icon(kind: &str) -> Element {
         "dup" => "M8 8h11v11H8zM5 16V5h11",
         "dice" => "M5 5h14v14H5zM9 9h.01M15 15h.01M15 9h.01M9 15h.01M12 12h.01",
         "x" => "M6 6l12 12M18 6L6 18",
+        "trash" => "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6",
         "down" => "M6 9l6 6 6-6",
         "edit" => "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4",
         // Race conditions (CourseCard). Ground: firm ground, then 1 to 3 drops for Good / Soft / Heavy.
