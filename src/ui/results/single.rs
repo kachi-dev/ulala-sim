@@ -6,7 +6,7 @@ use super::detail::{UmaLinks, UmaPick, outcome_class};
 use crate::charts::*;
 
 pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Option<&Run>) -> Element {
-    let (mut focus, mut detail_tab, mut run_tab) = (s.focus, s.detail_tab, s.run_tab);
+    let (mut focus, mut detail_tab, mut run_tab, mut replay) = (s.focus, s.detail_tab, s.run_tab, s.replay);
     // A single run has only Summary and Skills: the batch-only subtabs show Summary.
     let tab = if *detail_tab.read() == DetailTab::Skills { DetailTab::Skills } else { DetailTab::Summary };
     let rtab = *run_tab.read();
@@ -57,6 +57,8 @@ pub(super) fn single_view(s: S, res: &Res, names: &[String], cur: &Run, base: Op
                 h3 { if base.is_some() { "Result: edited vs baseline" } else { "Result" } }
                 span { class: "muted", "seed {cur.seed} · click a row to focus an uma" }
                 if improved { img { class: "great", src: "/a/great.webp", alt: "Great!" } }
+                div { class: "grow" }
+                button { class: "btn alt", title: "Watch the race from above, with a timeline to scrub", onclick: move |_| replay.set(true), {icon("play")} " Replay" }
             }
             div { class: "seg small dtabs",
                 for (t, label) in [(RunTab::Summary, "Summary"), (RunTab::More, "More")] {

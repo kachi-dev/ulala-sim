@@ -106,18 +106,25 @@ pub struct Run {
 
 /// Simulates `input` once (its own `random_seed`), gates in field order: Run once.
 pub fn run_once(race: &Race, input: &RaceInput) -> Run {
-    run(race, &sim_input(race, input, false))
+    run(race, &sim_input(race, input, false), false)
+}
+
+/// `run_once` with a frame every sim step (1/15 s) instead of the replay cadence (once a second mid-race): the same
+/// race bit for bit, for the replayer and finer per-progress curves. Not for `verify_against_server`.
+pub fn run_once_dense(race: &Race, input: &RaceInput) -> Run {
+    run(race, &sim_input(race, input, false), true)
 }
 
 /// `run_once` with the gates drawn from the seed (`gate_order`): a run of a batch. The `Run` is in field order all the
 /// same.
 pub fn run_drawn(race: &Race, input: &RaceInput) -> Run {
-    run(race, &sim_input(race, input, true))
+    run(race, &sim_input(race, input, true), false)
 }
 
-fn run(race: &Race, input: &SimInput) -> Run {
+fn run(race: &Race, input: &SimInput, dense: bool) -> Run {
     // = sim::simulate, keeping the spurt / HP internals before the race is consumed.
     let mut r = sim_race::init(&input.input, &race.data);
+    r.record_every_step = dense;
     tick::run(&mut r);
     finish_run(r, &input.order)
 }

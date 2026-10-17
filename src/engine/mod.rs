@@ -16,6 +16,7 @@ mod run;
 mod saves;
 mod skills;
 mod stamina;
+mod track;
 mod update;
 #[cfg(test)]
 mod tests;
@@ -37,6 +38,7 @@ pub use run::*;
 pub use saves::*;
 pub use skills::*;
 pub use stamina::*;
+pub use track::*;
 pub use update::*;
 pub use veterans::*;
 pub use wit::*;

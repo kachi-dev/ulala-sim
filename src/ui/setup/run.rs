@@ -43,9 +43,10 @@ fn run(s: S, n: Option<usize>) {
             None => {
                 let label = if pair { "Running baseline and edited" } else { "Running" };
                 job(s, label, 0, false, move |_| {
-                    let cur = Arc::new(run_once(&r, &inp));
+                    // A frame every sim step: the replay and the per-progress curves.
+                    let cur = Arc::new(run_once_dense(&r, &inp));
                     // Same seed as the edited run, so the pair differs only by the edits.
-                    let base = base.map(|b| Arc::new(run_once(&r, &RaceInput { random_seed: inp.random_seed, ..(*b).clone() })));
+                    let base = base.map(|b| Arc::new(run_once_dense(&r, &RaceInput { random_seed: inp.random_seed, ..(*b).clone() })));
                     Kind::Single { cur, base }
                 })
                 .await

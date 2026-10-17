@@ -227,6 +227,8 @@ struct S {
     /// Uma detail subtab (kept when another uma is shown).
     detail_tab: Signal<DetailTab>,
     run_tab: Signal<RunTab>,
+    /// The single run's replay dialog.
+    replay: Signal<bool>,
     editing: Signal<Option<usize>>,
     /// The skill picker over the edit drawer (the card's "Add skill" opens both).
     skill_pick: Signal<bool>,
@@ -340,6 +342,7 @@ pub fn App() -> Element {
         skill_sel: use_signal(|| None),
         detail_tab: use_signal(|| DetailTab::Summary),
         run_tab: use_signal(|| RunTab::Summary),
+        replay: use_signal(|| false),
         editing: use_signal(|| None),
         skill_pick: use_signal(|| false),
         picker: use_signal(|| false),
@@ -450,6 +453,7 @@ pub fn App() -> Element {
             SavesModal {}
             SaveSetupModal {}
             SaveUmaModal {}
+            results::ReplayModal {}
             NoHorseAct {}
             WhatsNew {}
             Toast {}

@@ -54,6 +54,15 @@ pub(super) fn style_badge(style: i32) -> Element {
     }
 }
 
+/// The picture `horse_icon` shows (path under /a/), None when it shows the initial.
+pub(super) fn portrait(h: &HorseInput) -> Option<String> {
+    let mob = format!("mob/{}.png", h.mob_id);
+    if h.chara_id == 0 && has_icon(&mob) {
+        return Some(mob);
+    }
+    [format!("card/{}.png", h.card_id), format!("chara/{}.png", h.chara_id)].into_iter().find(|r| has_icon(r))
+}
+
 /// `uma_icon`, or a mob (NPC) uma's face.
 pub(super) fn horse_icon(h: &HorseInput, ring: Option<&str>, size: &str) -> Element {
     let rel = format!("mob/{}.png", h.mob_id);
@@ -278,6 +287,8 @@ pub(super) fn icon(kind: &str) -> Element {
         "trash" => "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6",
         "down" => "M6 9l6 6 6-6",
         "edit" => "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4",
+        "play" => "M8 5v14l11-7z",
+        "pause" => "M8 5v14M16 5v14",
         // Race conditions (CourseCard). Ground: firm ground, then 1 to 3 drops for Good / Soft / Heavy.
         "firm" => "M3 19h18",
         "good" => "M3 19h18M12 5c-2 3-3 4.5-3 6.5a3 3 0 0 0 6 0c0-2-1-3.5-3-6.5z",

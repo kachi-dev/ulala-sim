@@ -4672,7 +4672,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "ulala"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "dioxus",
  "embed-resource",
@@ -4689,6 +4689,7 @@ dependencies = [
 [[package]]
 name = "uma_race_sim"
 version = "0.1.0"
+source = "git+https://github.com/kachi-dev/uma-race-simulator?rev=3633f199d0ccd0cee554f9254a1132c5aa3d1d3e#3633f199d0ccd0cee554f9254a1132c5aa3d1d3e"
 dependencies = [
  "base64 0.22.1",
  "flate2",

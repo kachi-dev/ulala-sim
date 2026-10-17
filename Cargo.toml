@@ -1,6 +1,6 @@
 [package]
 name = "ulala"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2024"
 license = "MIT"
 
@@ -8,7 +8,7 @@ license = "MIT"
 # Bump `rev` to ship a newer sim. For local development against a sibling checkout, put in .cargo/config.toml:
 #   [patch."https://github.com/kachi-dev/uma-race-simulator"]
 #   uma_race_sim = { path = "../uma-race-simulator" }
-uma_race_sim = { git = "https://github.com/kachi-dev/uma-race-simulator", rev = "0f9e6b5bfdbb5de3aaee1b0fcda999b994ab3fac" }
+uma_race_sim = { git = "https://github.com/kachi-dev/uma-race-simulator", rev = "3633f199d0ccd0cee554f9254a1132c5aa3d1d3e" }
 dioxus = { version = "0.7", features = ["desktop"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

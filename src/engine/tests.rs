@@ -436,3 +436,27 @@ fn gate_skill_outcomes() {
     assert!(wit > 0.1 && cant > 0.4, "{o:?}");
 }
 
+
+#[test]
+fn dense_frames_and_track() {
+    let mut race = new_race();
+    race.input.horses = cards().iter().take(9).map(|c| new_horse(&race, c.card_id)).collect();
+    let (a, b) = (run_once(&race, &race.input), run_once_dense(&race, &race.input));
+    // Recording every step changes only the frames: the same race, the replay cadence's frames among them. Activation
+    // distances, interpolated from frames, move by mm.
+    assert_eq!((&a.out.results, &a.out.events), (&b.out.results, &b.out.events));
+    assert!(a.activations.iter().zip(&b.activations).all(|(x, y)| x.time == y.time && (x.distance - y.distance).abs() < 0.05));
+    assert!(b.out.frames.windows(2).all(|w| w[1].time - w[0].time < 0.07) && a.out.frames.windows(2).any(|w| w[1].time - w[0].time > 0.9));
+    assert!(a.out.frames.iter().all(|f| b.out.frames.contains(f)));
+    let f = &b.out.frames[200];
+    assert_eq!(horses_at(&b.out.frames, f.time), f.horses);
+    let t = track(&race, &race.input);
+    assert_eq!((t.goal, t.ground), (1600.0, 2)); // Tokyo dirt 1600m
+    assert!(t.width > 0.5 && t.metre > 0.5 && t.loop_span.is_some());
+    // 100 m of lane 0 is ~100 m of world, the outer rail `width` lanes out.
+    let (p, q) = (t.at(500.0, 0.0), t.at(600.0, 0.0));
+    let len = (p.0 - q.0).hypot(p.1 - q.1) / t.metre;
+    assert!((len - 100.0).abs() < 1.0, "{len}");
+    let o = t.at(500.0, t.width);
+    assert!(((p.0 - o.0).hypot(p.1 - o.1) - t.width * 11.25).abs() < 0.01);
+}
