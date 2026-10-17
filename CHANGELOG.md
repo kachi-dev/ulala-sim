@@ -21,3 +21,7 @@ Shown in the app the first time a new version opens; the release workflow also p
 - SP tracking
 - Show skill/velocity on course image
 - Idk probably other UI stuff I forgor
+
+## 0.2.2
+- Fix uma ranking tab
+- Skipping versions when updating now shows the changelog of every version since the last one you saw

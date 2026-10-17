@@ -640,8 +640,8 @@ fn WhatsNew() -> Element {
         }
         data.set(h.join().unwrap_or_default());
     });
-    let lines = notes().unwrap_or_default();
-    if lines.is_empty() && data.read().is_empty() {
+    let versions = notes().unwrap_or_default();
+    if versions.is_empty() && data.read().is_empty() {
         return rsx! {};
     }
     let mut close = move || {
@@ -651,8 +651,8 @@ fn WhatsNew() -> Element {
     rsx! {
         div { class: "scrim top", onclick: move |_| close() }
         div { class: "modal notice",
-            if !lines.is_empty() {
-                h3 { "What's new in v{VERSION}" }
+            for (v, lines) in versions {
+                h3 { "What's new in v{v}" }
                 ul { class: "changelog",
                     for l in lines {
                         li { "{l}" }

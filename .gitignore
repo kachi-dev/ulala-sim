@@ -1,5 +1,5 @@
 /target
 /.claude
-/tools
+/tools/*
 /target-*
 /.cargo/

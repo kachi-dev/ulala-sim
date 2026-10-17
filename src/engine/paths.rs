@@ -74,16 +74,17 @@ pub fn set_cpu_pref(pct: u8) {
     save(&p);
 }
 
-/// Records `version` as the last one whose changelog was shown, returning whether it's new to this settings file
-/// (never on the first launch: a fresh install has nothing to compare against).
-pub(super) fn mark_seen(version: &str) -> bool {
+/// Records `version` as the last one whose changelog was shown. When it's new to this settings file: Some(the one
+/// shown before, None from before it was kept). None when it isn't, and on the first launch (a fresh install has
+/// nothing to compare against).
+pub(super) fn mark_seen(version: &str) -> Option<Option<String>> {
     let mut p = paths();
     if p.seen.as_deref() == Some(version) {
-        return false;
+        return None;
     }
-    p.seen = Some(version.to_string());
+    let before = p.seen.replace(version.to_string());
     save(&p);
-    !p.first
+    (!p.first).then_some(before)
 }
 
 /// Worker threads for long jobs.

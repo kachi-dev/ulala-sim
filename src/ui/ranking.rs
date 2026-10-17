@@ -1,5 +1,5 @@
-//! Uma ranking tab: which costume (by its unique skill) and running style is best on this course. A fixed test uma
-//! (`RANK_STATS`) takes the selected uma's gate and wears each card, the style forced, aptitudes A.
+//! Uma ranking tab: which costume (by its unique skill) and running style is best on this course. The selected uma
+//! wears each card and runs each style with A aptitude for it; her stats, other aptitudes and other skills stay.
 
 use super::gains::gain_charts;
 use super::*;
@@ -65,7 +65,7 @@ pub fn RankingTab() -> Element {
     let start = move |_| {
         let (Some(race), Some(cv)) = (s.race.cloned(), s.cview.cloned()) else { return };
         let Some(size) = size.filter(|_| combos > 0) else { return };
-        let (input, i) = ranking_field(&race, &s.input.peek(), hi, &s.npcs.peek(), size);
+        let (input, i) = npc_field(&race, &s.input.peek(), hi, false, &s.npcs.peek(), size);
         let (cards, styles, rev, field) = (picked.clone(), styles.clone(), *s.rev.peek(), input.horses.clone());
         let label = format!("Ranking {} umas × {} styles × {n} seeds", cards.len(), styles.len());
         let run = move |w: &Work| uma_ranking(&race, &input, i, &cards, &styles, n, w);
@@ -81,10 +81,11 @@ pub fn RankingTab() -> Element {
             div { class: "card-h",
                 h3 { "Uma ranking" }
                 span { class: "muted small",
-                    "Which uma wins on this course by her unique skill, run at each style with A aptitude, unique on vs muted."
+                    "Which unique skill gains the most on this course: the selected uma wearing each costume at each style with A aptitude, unique on vs muted."
                 }
             }
             div { class: "gsetup",
+                {who_sel(s)}
                 div { class: "field",
                     span { "Styles" }
                     div { class: "seg",

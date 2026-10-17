@@ -328,27 +328,12 @@ pub struct UmaRank {
     pub by_distance: Vec<(f32, f32)>,
 }
 
-/// Uma ranking's test uma: Speed, Stamina, Power, Guts, Wit.
-pub const RANK_STATS: [i32; 5] = [1600, 2800, 1200, 600, 1200];
-
-/// Uma ranking's field: `input`'s, `input.horses[horse]` replaced by a test uma with `RANK_STATS`, no skills and Great
-/// mood, then NPCs up to `size` (`npc_field`). `uma_ranking` dresses the test uma in each card.
-pub fn ranking_field(race: &Race, input: &RaceInput, horse: usize, setup: &NpcSetup, size: usize) -> (RaceInput, usize) {
-    let [speed, stamina, pow, guts, wiz] = RANK_STATS;
-    let mut inp = input.clone();
-    let popularity = inp.horses[horse].popularity;
-    inp.horses[horse] = HorseInput { motivation: 5, speed, stamina, pow, guts, wiz, popularity, ..Default::default() };
-    npc_field(race, &inp, horse, false, setup, size)
-}
-
-/// Best uma on this course by unique skill: for each (card, style), `input.horses[horse]` wearing that card (stats,
-/// skills, mood kept; `set_card` swaps the unique), running that style with A aptitude for it and for the course's
-/// distance and surface (so only the unique differs between cards), unique on vs muted on `n` seeds (`skill_gains`'
-/// measure). Sorted by mean gain, best first; cancelled items are dropped. Also each horse's full-spurt rate.
+/// Best uma on this course by unique skill: for each (card, style), `input.horses[horse]` wearing that card and
+/// running that style with A aptitude for it, everything else hers (stats, other aptitudes, mood, skills; `set_card`
+/// swaps the unique, and the inherited version of the card's unique goes, as no uma has both), unique on vs muted on
+/// `n` seeds (`skill_gains`' measure). Sorted by mean gain, best first; cancelled items are dropped. Also each horse's full-spurt rate.
 pub fn uma_ranking(race: &Race, input: &RaceInput, horse: usize, cards: &[i32], styles: &[i32], n: usize, w: &Work) -> (Vec<UmaRank>, Vec<f32>) {
     let seeds = seeds(input.random_seed, n);
-    let c = course_info(&race.data, input.course_set_id);
-    let dt = distance_type(c.distance);
     // (card, style, unique)
     let items: Vec<(i32, i32, i32)> = cards
         .iter()
@@ -360,11 +345,14 @@ pub fn uma_ranking(race: &Race, input: &RaceInput, horse: usize, cards: &[i32], 
     let (v, spurt) = measure(items.len(), n, w, |k, s| {
         let (card, style, unique) = items[k];
         paired_gain(race, input, horse, seeds[s], unique, None, |h| {
+            // set_card takes on another uma's aptitudes; she keeps her own.
+            let apt = (h.proper_distance, h.proper_running_style, h.proper_ground);
             set_card(h, card);
+            (h.proper_distance, h.proper_running_style, h.proper_ground) = apt;
             h.running_style = style;
-            h.proper_running_style[(style - 1).clamp(0, 3) as usize] = 7;
-            h.proper_distance[dt] = 7;
-            h.proper_ground[(c.surface - 1).clamp(0, 1) as usize] = 7;
+            h.proper_running_style[(style - 1).clamp(0, 3) as usize] = GRADE_A;
+            // 9xxxxx = the inherited version of unique 1xxxxx (skills.rs).
+            h.skills.retain(|k| k.skill_id != unique + 800_000);
         })
     });
     let v = v.into_iter().map(|(k, g)| UmaRank { card_id: items[k].0, style: items[k].1, lengths: g.lengths, samples: g.samples, rate: g.rate, distances: g.distances, by_distance: g.by_distance });

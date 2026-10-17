@@ -67,16 +67,30 @@ pub fn install_release(v: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// This version's CHANGELOG.md lines, the first time it runs after an update (once: it's marked seen here).
-pub fn unseen_changelog() -> Option<Vec<&'static str>> {
-    super::mark_seen(VERSION).then(|| changelog(include_str!("../../CHANGELOG.md"), VERSION)).filter(|l| !l.is_empty())
+/// CHANGELOG.md's (version, lines) the first time this version runs after an update (once: it's marked seen here):
+/// every version since the last one shown, newest first, so skipping releases loses nothing.
+pub fn unseen_changelog() -> Option<Vec<(&'static str, Vec<&'static str>)>> {
+    let since = super::mark_seen(VERSION)?;
+    Some(changelog(include_str!("../../CHANGELOG.md"), since.as_deref(), VERSION)).filter(|v| !v.is_empty())
 }
 
-/// The lines under `## {version}` up to the next heading, without blanks and list markers.
-fn changelog<'a>(md: &'a str, version: &str) -> Vec<&'a str> {
-    let head = format!("## {version}");
-    let lines = md.lines().skip_while(|l| l.trim() != head).skip(1).take_while(|l| !l.starts_with("## "));
-    lines.map(|l| l.trim().trim_start_matches(['-', '*']).trim()).filter(|l| !l.is_empty()).collect()
+/// The `## {v}` sections after `since` up to `version` (just `version`'s when `since` is None), newest first: each
+/// one's lines up to the next heading, without blanks and list markers. Empty sections are left out.
+fn changelog<'a>(md: &'a str, since: Option<&str>, version: &str) -> Vec<(&'a str, Vec<&'a str>)> {
+    let mut out: Vec<(&str, Vec<&str>)> = Vec::new();
+    for l in md.lines() {
+        if let Some(v) = l.strip_prefix("## ") {
+            out.push((v.trim(), Vec::new()));
+        } else if let Some((_, lines)) = out.last_mut() {
+            let l = l.trim().trim_start_matches(['-', '*']).trim();
+            if !l.is_empty() {
+                lines.push(l);
+            }
+        }
+    }
+    out.retain(|(v, lines)| !lines.is_empty() && (*v == version || since.is_some_and(|s| is_newer(v, s) && is_newer(version, v))));
+    out.sort_by(|a, b| if is_newer(a.0, b.0) { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater });
+    out
 }
 
 /// Deletes the exe an update replaced. Retries for a while: right after an update the old process is still exiting.
@@ -114,6 +128,9 @@ fn changelog_section() {
 ## 0.1.7
 - old
 ";
-    assert_eq!(changelog(md, "0.1.8"), ["one", "two"]);
-    assert!(changelog(md, "0.1.6").is_empty());
+    assert_eq!(changelog(md, None, "0.1.8"), [("0.1.8", vec!["one", "two"])]);
+    assert!(changelog(md, None, "0.1.6").is_empty());
+    // Skipped releases: everything after the last one shown, newest first.
+    assert_eq!(changelog(md, Some("0.1.6"), "0.1.9"), [("0.1.9", vec!["later"]), ("0.1.8", vec!["one", "two"]), ("0.1.7", vec!["old"])]);
+    assert_eq!(changelog(md, Some("0.1.7"), "0.1.8"), [("0.1.8", vec!["one", "two"])]);
 }
