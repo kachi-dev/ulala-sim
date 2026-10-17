@@ -334,7 +334,7 @@ pub(super) fn who_sel(s: S) -> Element {
                 {horse_icon(h, Some(&cols[hi]), "md")}
                 div {
                     b { "{chara_name(h.chara_id)}" }
-                    div { class: "muted small", "{card_title(h.card_id)}, gate {hi + 1} · select another in the field" }
+                    div { class: "muted small", "{card_title(h.card_id)}, #{hi + 1} · select another in the field" }
                 }
             }
         }

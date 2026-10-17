@@ -25,3 +25,6 @@ Shown in the app the first time a new version opens; the release workflow also p
 ## 0.2.2
 - Fix uma ranking tab
 - Skipping versions when updating now shows the changelog of every version since the last one you saw
+
+## 0.2.3
+- Gate draws are now uniformly random instead of being static across races (i.e. the #1 horse would previously always be in gate 1 across all races)

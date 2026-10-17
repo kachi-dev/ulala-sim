@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uma_race_sim::api::{HorseInput, RaceInput, SkillInput};
 
-use super::{Dist, GRADE_A, MAX_STAMINA, Race, Run, STYLES, Work, ability_type, course_info, custom_popularity, default_level, dist, distance_type, gap_lengths, names, par_map, resume, run_forking, run_once, seeds, set_card, sim_input};
+use super::{Dist, GRADE_A, MAX_STAMINA, Race, Run, STYLES, Work, ability_type, course_info, custom_popularity, default_level, dist, distance_type, gap_lengths, names, par_map, resume, run_drawn, run_forking, seeds, set_card, sim_input};
 
 /// Default NPC field size (a Champions Meeting field): the measured uma and 8 NPCs.
 pub const FIELD_MIN: usize = 9;
@@ -78,7 +78,7 @@ pub fn lobby_counts(mix: [usize; 5], n: usize) -> [usize; 5] {
     c
 }
 
-/// The field to measure in, and the measured uma's index in it. `alone`: `input.horses[horse]` at the middle gate
+/// The field to measure in, and the measured uma's index in it. `alone`: `input.horses[horse]` in the middle
 /// among `size - 1` NPCs; else `input`'s field with NPCs after it up to `size`. NPCs: `lobby_styles` of
 /// `setup.counts`, each a different `MOBS` uma (`npc`). Popularity is re-ranked when NPCs were added.
 pub fn npc_field(race: &Race, input: &RaceInput, horse: usize, alone: bool, setup: &NpcSetup, size: usize) -> (RaceInput, usize) {
@@ -264,10 +264,10 @@ fn paired_gain(race: &Race, input: &RaceInput, i: usize, seed: i32, id: i32, swa
     };
     if sets_style(race, id) {
         // Runaway: the muted run drops the skill, so the runs differ from the start.
-        return pair(&run_once(race, &run(false)), &run_once(race, &run(true)), i, id);
+        return pair(&run_drawn(race, &run(false)), &run_drawn(race, &run(true)), i, id);
     }
     let (on, muted) = (run(false), run(true));
-    let (on, muted) = (sim_input(race, &on), sim_input(race, &muted));
+    let (on, muted) = (sim_input(race, &on, true), sim_input(race, &muted, true));
     let (b, forks) = run_forking(race, &muted, &[[(i, id)].into_iter().chain(swap.map(|s| (i, s))).collect()]);
     match forks.into_iter().next().flatten() {
         Some(f) => pair(&resume(f, &on), &b, i, id),
@@ -281,7 +281,7 @@ fn paired_gain(race: &Race, input: &RaceInput, i: usize, seed: i32, id: i32, swa
 fn owned_gains(race: &Race, input: &RaceInput, i: usize, seed: i32, ids: &[i32]) -> Vec<Pair> {
     let mut on = RaceInput { random_seed: seed, ..input.clone() };
     on.horses[i].viewer_id = 1; // dense frames near the goal (recording only)
-    let sim_on = sim_input(race, &on);
+    let sim_on = sim_input(race, &on, true);
     let (a, forks) = run_forking(race, &sim_on, &ids.iter().map(|&id| vec![(i, id)]).collect::<Vec<_>>());
     ids.iter()
         .zip(forks)
@@ -289,7 +289,7 @@ fn owned_gains(race: &Race, input: &RaceInput, i: usize, seed: i32, ids: &[i32])
             let Some(f) = f else { return unfired(&a) };
             let mut muted = on.clone();
             muted.horses[i].muted_skills.push(id);
-            pair(&a, &resume(f, &sim_input(race, &muted)), i, id)
+            pair(&a, &resume(f, &sim_input(race, &muted, true)), i, id)
         })
         .collect()
 }

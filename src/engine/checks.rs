@@ -12,8 +12,10 @@ pub enum SkillOutcome {
     Activated,
     /// Lost the pre-race wit roll (`chance` %, from the uma's wit).
     WitCheck { chance: f32 },
-    /// A fixed condition (running style, distance, surface, track, ...) rules it out in this race. The failing terms.
-    CantHere(Vec<String>),
+    /// A fixed condition (running style, distance, surface, track, ...) rules it out in this race: the failing terms.
+    /// `by_gate`: only with the gate or post number, which batches draw per seed (the other terms are the same every
+    /// seed).
+    CantHere { terms: Vec<String>, by_gate: bool },
     /// Its precondition never held.
     Precondition,
     /// Its conditions never all held at once. `window`: the randomly drawn stretch (m) it could activate in, if any.
@@ -25,7 +27,7 @@ impl SkillOutcome {
         match self {
             Self::Activated => OutcomeKind::Activated,
             Self::WitCheck { .. } => OutcomeKind::WitCheck,
-            Self::CantHere(_) => OutcomeKind::CantHere,
+            Self::CantHere { .. } => OutcomeKind::CantHere,
             Self::Precondition | Self::NotMet { .. } => OutcomeKind::NotMet,
         }
     }
@@ -75,7 +77,7 @@ pub(super) fn skill_checks(r: &sim_race::Race, i: usize) -> Vec<SkillCheck> {
     let sm = &h.skill_manager;
     h.horse_data.skills.iter().map(|s| {
         let outcome = match sm.skills.iter().find(|b| b.id == s.skill_id) {
-            None => SkillOutcome::CantHere(vec!["not in this era's skill data".into()]),
+            None => SkillOutcome::CantHere { terms: vec!["not in this era's skill data".into()], by_gate: false },
             Some(b) if !b.is_activate_enable => {
                 // = lot_activate_skill's threshold.
                 let p = &r.data.param.Skill;
@@ -88,9 +90,10 @@ pub(super) fn skill_checks(r: &sim_race::Race, i: usize) -> Vec<SkillCheck> {
                 let (d, m) = (&b.details[0], &b.skill_master.details[0]);
                 // Fixed terms never change during the race, so their final state is the whole race's.
                 let (c, text) = if d.is_need_pre_trigger_check { (&d.pre_trigger, &m.precondition) } else { (&d.trigger, &m.condition) };
-                let out = ruled_out(&sm.triggers, c, text);
+                let out = ruled_out(&sm.triggers, c, text, fixed);
                 if !out.is_empty() {
-                    SkillOutcome::CantHere(out)
+                    let by_gate = ruled_out(&sm.triggers, c, text, |k| fixed(k) && !matches!(k, K::GateNumber | K::PostNumber)).is_empty();
+                    SkillOutcome::CantHere { terms: out, by_gate }
                 } else if d.is_need_pre_trigger_check {
                     SkillOutcome::Precondition
                 } else {
@@ -113,8 +116,8 @@ fn terms(text: &str) -> impl Iterator<Item = &str> {
     text.split('@').filter(|g| !g.is_empty()).flat_map(|g| g.split('&'))
 }
 
-/// The false fixed terms of `c`, if they rule out every OR-group; else empty.
-fn ruled_out(arena: &[SkillTrigger], c: &SkillTriggerCollection, text: &str) -> Vec<String> {
+/// The false `fixed` terms of `c`, if they rule out every OR-group; else empty.
+fn ruled_out(arena: &[SkillTrigger], c: &SkillTriggerCollection, text: &str, fixed: impl Fn(&K) -> bool) -> Vec<String> {
     let SkillTriggerCollection::Collection { any_empty_group: false, .. } = c else { return vec![] };
     let ts = &arena[c.range()];
     let bad: Vec<(u16, &str)> = ts.iter().zip(terms(text)).filter(|(t, _)| fixed(&t.kind) && !t.is_activated).map(|(t, s)| (t.group, s)).collect();

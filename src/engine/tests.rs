@@ -384,3 +384,55 @@ fn shared_run_fingerprint() {
     }
     std::fs::write(std::env::var("OPT_FP").expect("OPT_FP"), out).unwrap();
 }
+
+/// Batch runs draw gates uniformly; a drawn run is the field entered in drawn order, read back in field order; a
+/// forked run still matches the full one.
+#[test]
+fn gate_draw() {
+    let mut seen = [[0u32; 9]; 9];
+    for s in seeds(3, 9000) {
+        let o = gate_order(s, 9);
+        assert_eq!({ let mut v = o.clone(); v.sort(); v }, (0..9).collect::<Vec<_>>());
+        o.iter().enumerate().for_each(|(g, &u)| seen[u][g] += 1);
+    }
+    assert!(seen.iter().flatten().all(|&k| (850..1150).contains(&k)), "{seen:?}");
+    let race = new_race();
+    let npcs = NpcSetup { skills: vec![200331, 200771], ..NpcSetup::default() };
+    let (mut f, i) = npc_field(&race, &race.input, 0, true, &npcs, FIELD_MIN);
+    // Distinct stat totals: popularity doesn't depend on the order.
+    f.horses.iter_mut().enumerate().for_each(|(k, h)| h.speed += 7 * k as i32);
+    let d = sim_input(&race, &f, true);
+    assert_ne!(d.order, (0..FIELD_MIN).collect::<Vec<_>>());
+    let (drawn, fixed) = (run_drawn(&race, &f), run_once(&race, &d.input));
+    for (g, &u) in d.order.iter().enumerate() {
+        assert_eq!(drawn.horses[u], fixed.horses[g]);
+        assert_eq!(drawn.out.frames[40].horses[u], { let mut h = fixed.out.frames[40].horses[g]; h.block_front_horse_index = (h.block_front_horse_index >= 0).then(|| d.order[h.block_front_horse_index as usize] as i8).unwrap_or(-1); h });
+    }
+    let gate_of = |u: usize| d.order.iter().position(|&x| x == u).unwrap();
+    assert_eq!(drawn.activations.len(), fixed.activations.len());
+    assert!(drawn.activations.iter().any(|a| a.targets != 0));
+    for a in &drawn.activations {
+        let t = (0..FIELD_MIN).filter(|&u| a.targets >> u & 1 == 1).fold(0u32, |m, u| m | 1 << gate_of(u));
+        assert!(fixed.activations.contains(&Activation { horse: gate_of(a.horse), targets: t, ..a.clone() }), "{a:?}");
+    }
+    // Resuming the same input from a fork = the full drawn run.
+    let id = f.horses[i].skills[0].skill_id;
+    let (b, forks) = run_forking(&race, &d, &[vec![(i, id)]]);
+    assert_eq!(b.horses, drawn.horses);
+    assert_eq!(resume(forks.into_iter().next().flatten().expect("her unique activated"), &d).horses, drawn.horses);
+}
+
+/// A skill only the drawn gate rules out: its wit losses stay wit losses (the gate might have allowed it). Gate and
+/// post skills are green (no wit roll) except the luck one.
+#[test]
+fn gate_skill_outcomes() {
+    let race = new_race();
+    let (mut f, i) = npc_field(&race, &race.input, 0, true, &NpcSetup::default(), FIELD_MIN);
+    f.horses[i].wiz = 300;
+    f.horses[i].skills.push(SkillInput { skill_id: 201562, level: 1 }); // random_lot==50&post_number==7
+    let b = run_batch(&race, &f, &seeds(1, 200), true, &Work::default());
+    let o = b.horses[i].skills.iter().find(|k| k.skill_id == 201562).unwrap().outcomes;
+    let (wit, cant) = (o[OutcomeKind::WitCheck as usize], o[OutcomeKind::CantHere as usize]);
+    assert!(wit > 0.1 && cant > 0.4, "{o:?}");
+}
+

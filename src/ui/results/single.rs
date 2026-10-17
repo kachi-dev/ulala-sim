@@ -290,7 +290,7 @@ fn why(c: &SkillCheck, h: &HorseRun, goal: f32, n: usize) -> Element {
     let (head, detail) = match &c.outcome {
         SkillOutcome::Activated => return rsx! {},
         SkillOutcome::WitCheck { chance } => ("Failed the wit check", format!("{chance:.0}% chance to pass.")),
-        SkillOutcome::CantHere(t) => ("Can't activate in this race", format!("Needs {}.", t.join(" + "))),
+        SkillOutcome::CantHere { terms, .. } => ("Can't activate in this race", format!("Needs {}.", terms.join(" + "))),
         SkillOutcome::Precondition => ("Precondition never held", cond()),
         SkillOutcome::NotMet { window: Some((a, b)) } => {
             let place = h.place_by_progress[((a / goal * 100.0).round() as usize).min(100)];

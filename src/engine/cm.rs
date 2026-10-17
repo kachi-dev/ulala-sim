@@ -38,9 +38,9 @@ pub fn sim_race(path: &Path, team: &[usize], n: usize, w: &Work) -> Result<RaceS
     if let Some(&h) = team.iter().find(|&&h| h >= race.input.horses.len()) {
         return Err(format!("{}: no horse {h}", path.display()));
     }
-    // Fresh seeds only: the save's own seed is the race that happened.
+    // Fresh seeds only: the save's own seed is the race that happened. The server's gates: this is that race again.
     let seeds = seeds(race.input.random_seed, n + 1).split_off(1);
-    let b = run_batch(&race, &race.input, &seeds, w);
+    let b = run_batch(&race, &race.input, &seeds, false, w);
     let runs = b.horses.first().map_or(0, |h| h.places.len());
     let best: Vec<u8> = (0..runs).map(|r| team.iter().map(|&h| b.horses[h].places[r]).min().unwrap_or(0)).collect();
     let k = runs.max(1) as f32;

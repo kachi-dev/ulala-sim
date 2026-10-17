@@ -2,20 +2,34 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 
 use uma_race_sim::api::RaceInput;
 
-use super::{Activation, HorseRun, OutcomeKind, Race, SpurtKind, run_once};
+use super::{Activation, HorseRun, OutcomeKind, Race, SkillOutcome, SpurtKind, run_drawn, run_once};
 
 /// `n` seeds: `s` first, then deterministic pseudo-random ones derived from it.
 pub fn seeds(s: i32, n: usize) -> Vec<i32> {
     let mut x = s as u32 as u64;
-    let mut next = move || {
-        // splitmix64, top 31 bits (non-negative like the game's seeds).
-        x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = x;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        ((z ^ (z >> 31)) >> 33) as i32
-    };
-    std::iter::once(s).chain(std::iter::repeat_with(&mut next)).take(n).collect()
+    // Top 31 bits: non-negative like the game's seeds.
+    std::iter::once(s).chain(std::iter::repeat_with(|| (splitmix(&mut x) >> 33) as i32)).take(n).collect()
+}
+
+/// splitmix64's next output.
+fn splitmix(x: &mut u64) -> u64 {
+    *x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = *x;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// The game's gate draw for `n` umas on `seed`, uniform: `order[g]` = the field index of the uma at gate `g + 1`. Its
+/// own stream (salted, so not `seeds`' next seed), leaving the sim's draws from the seed alone. A field smaller than
+/// the course's gates takes the inner ones, as in the game.
+pub fn gate_order(seed: i32, n: usize) -> Vec<usize> {
+    let mut x = seed as u32 as u64 ^ 0x6A09_E667_F3BC_C908;
+    let mut order: Vec<usize> = (0..n).collect();
+    for i in (1..n).rev() {
+        order.swap(i, (splitmix(&mut x) % (i as u64 + 1)) as usize);
+    }
+    order
 }
 
 /// Mean, nearest-rank percentiles, min, max. Empty → all 0.
@@ -138,23 +152,26 @@ pub struct Batch {
 }
 
 /// Fractions of `runs` per `OutcomeKind` for skill `id`. A disabled skill's conditions are never checked, so a lost
-/// wit roll hides "can't here"; fixed conditions are the same every seed, so then those runs can't either.
+/// wit roll hides "can't here"; a cause that is the same every seed (not the drawn gate) rules out those runs too.
 fn outcomes(runs: &[&HorseRun], id: i32) -> [f32; 4] {
     let k = runs.len().max(1) as f32;
-    let mut o = OutcomeKind::ALL.map(|kind| runs.iter().filter(|x| x.skills.iter().any(|c| c.skill_id == id && c.outcome.kind() == kind)).count() as f32 / k);
+    let checks = || runs.iter().flat_map(|x| x.skills.iter().find(|c| c.skill_id == id));
+    let mut o = OutcomeKind::ALL.map(|kind| checks().filter(|c| c.outcome.kind() == kind).count() as f32 / k);
     let (cant, wit) = (OutcomeKind::CantHere as usize, OutcomeKind::WitCheck as usize);
-    if o[cant] > 0.0 {
+    if checks().any(|c| matches!(c.outcome, SkillOutcome::CantHere { by_gate: false, .. })) {
         (o[cant], o[wit]) = (o[cant] + o[wit], 0.0);
     }
     o
 }
 
-/// Runs `input` once per seed on `worker_threads()`, counting finished runs in `w.done`. Once `w.cancel` is set it
-/// stops early and the result covers only the finished seeds (callers discard it).
-pub fn run_batch(race: &Race, input: &RaceInput, seeds: &[i32], w: &Work) -> Batch {
+/// Runs `input` once per seed on `worker_threads()`, counting finished runs in `w.done`. `draw`: gates drawn per seed
+/// (`run_drawn`); else in field order (the CM tab replays the server's draw). Once `w.cancel` is set it stops early
+/// and the result covers only the finished seeds (callers discard it).
+pub fn run_batch(race: &Race, input: &RaceInput, seeds: &[i32], draw: bool, w: &Work) -> Batch {
     // Keep only the summaries: full frames for thousands of runs would be ~100 MB.
     let runs: Vec<_> = par_map(seeds.len(), w, |i| {
-        let r = run_once(race, &RaceInput { random_seed: seeds[i], ..input.clone() });
+        let inp = RaceInput { random_seed: seeds[i], ..input.clone() };
+        let r = if draw { run_drawn(race, &inp) } else { run_once(race, &inp) };
         (r.horses, r.activations)
     })
     .into_iter()

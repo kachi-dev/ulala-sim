@@ -1,6 +1,6 @@
 use uma_race_sim::api::RaceInput;
 
-use super::{Activation, HorseRun, HorseStats, Race, Run, SpurtKind, Work, ability_type, distance_at, gap_lengths, par_map, resume, run_forking, run_once, sim_input, summarize, target_type};
+use super::{Activation, HorseRun, HorseStats, Race, Run, SpurtKind, Work, ability_type, distance_at, gap_lengths, par_map, resume, run_drawn, run_forking, sim_input, summarize, target_type};
 
 /// Raw stamina of "max stamina" (2000 after the sim halves the part over 1200, the game's cap).
 pub const MAX_STAMINA: i32 = 2800;
@@ -87,17 +87,17 @@ pub fn stamina(race: &Race, input: &RaceInput, i: usize, seeds: &[i32], with_deb
     let triggers: Vec<Vec<(usize, i32)>> = debuffs.iter().map(|&d| vec![d]).chain(any.then(|| debuffs.clone())).collect();
     let res: Vec<SeedResult> = par_map(seeds.len(), w, |s| {
         let base = at(seeds[s]);
-        let sim_base = sim_input(race, &base);
+        let sim_base = sim_input(race, &base, true);
         let (a, mut forks) = run_forking(race, &sim_base, &triggers);
         let mut max = at(seeds[s]);
         max.horses[i].stamina = MAX_STAMINA;
-        let max = run_once(race, &max);
+        let max = run_drawn(race, &max);
         let as_is = outcome(&a);
         // `ds` muted, from fork `k` (it hit, so it activated).
         let mut muted = |k: usize, ds: &[(usize, i32)]| {
             let mut m = base.clone();
             ds.iter().for_each(|d| mute(&mut m, d));
-            resume(forks[k].take().expect("a debuff that hit activated"), &sim_input(race, &m))
+            resume(forks[k].take().expect("a debuff that hit activated"), &sim_input(race, &m, true))
         };
         let per: Vec<DebuffSeed> = debuffs
             .iter()

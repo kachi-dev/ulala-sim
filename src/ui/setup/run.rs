@@ -21,11 +21,11 @@ fn run(s: S, n: Option<usize>) {
     let mut trainers = s.trainers.cloned();
     trainers.resize(input.horses.len(), String::new());
     let trainers = Arc::new(trainers);
-    // NPCs come after the umas: the player keeps her gate.
+    // NPCs come after the umas: the player keeps her field index.
     let player = player_now(&race, &setup);
     let colors = Arc::new(uma_colors(&input, player));
     let mut ed_mask = edited_mask(base_setup.as_deref(), &setup);
-    // Umas pair up with the baseline's (`pairing`); NPCs only when the umas are as many, so they keep their gates.
+    // Umas pair up with the baseline's (`pairing`); NPCs only when the umas are as many, so they keep their field index.
     let mut pairs = base_setup.as_deref().map_or(vec![], |b| pairing(b, &setup));
     if let (Some(b), Some(bf)) = (base_setup.as_deref(), base.as_deref()) {
         let same_gates = b.horses.len() == setup.horses.len();
@@ -54,8 +54,8 @@ fn run(s: S, n: Option<usize>) {
                 let total = n * if pair { 2 } else { 1 };
                 job(s, &format!("Simulating {} races", thousands(total)), total, true, move |w| {
                     let seeds = seeds(inp.random_seed, n);
-                    let base = base.map(|b| Arc::new(run_batch(&r, &b, &seeds, w)));
-                    let cur = Arc::new(run_batch(&r, &inp, &seeds, w));
+                    let base = base.map(|b| Arc::new(run_batch(&r, &b, &seeds, true, w)));
+                    let cur = Arc::new(run_batch(&r, &inp, &seeds, true, w));
                     Kind::Batch { cur, base }
                 })
                 .await

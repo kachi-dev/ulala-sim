@@ -1,7 +1,7 @@
 use uma_race_sim::api::{Frame, HorseFrame, RaceInput, SimOutput, event_kind, span_kind};
 use uma_race_sim::sim::{defs::last_spurt_calc_result, race as sim_race, record, tick};
 
-use super::{Race, SkillCheck, SkillOutcome, checks::skill_checks};
+use super::{Race, SkillCheck, SkillOutcome, checks::skill_checks, gate_order};
 
 /// One skill activation in a run.
 #[derive(Clone, Debug, PartialEq)]
@@ -17,7 +17,7 @@ pub struct Activation {
     pub end: f32,
     /// A passive skill, in effect the whole race.
     pub passive: bool,
-    /// Horses it targeted: bit `g` = horse (gate) `g`.
+    /// Horses it targeted: bit `h` = horse `h` (field order).
     pub targets: u32,
 }
 
@@ -104,32 +104,44 @@ pub struct Run {
     pub activations: Vec<Activation>,
 }
 
-/// Simulates `input` once (its own `random_seed`).
+/// Simulates `input` once (its own `random_seed`), gates in field order: Run once.
 pub fn run_once(race: &Race, input: &RaceInput) -> Run {
-    let input = sim_input(race, input);
+    run(race, &sim_input(race, input, false))
+}
+
+/// `run_once` with the gates drawn from the seed (`gate_order`): a run of a batch. The `Run` is in field order all the
+/// same.
+pub fn run_drawn(race: &Race, input: &RaceInput) -> Run {
+    run(race, &sim_input(race, input, true))
+}
+
+fn run(race: &Race, input: &SimInput) -> Run {
     // = sim::simulate, keeping the spurt / HP internals before the race is consumed.
-    let mut r = sim_race::init(&input, &race.data);
+    let mut r = sim_race::init(&input.input, &race.data);
     tick::run(&mut r);
-    finish_run(r)
+    finish_run(r, &input.order)
 }
 
 /// A paused race (state, past `tick::start`) that `resume` finishes; shared by the triggers that fork from it.
 pub(super) type Snap<'a> = std::rc::Rc<(sim_race::Race<'a>, bool)>;
 
-/// `run_once` of `input` (already `sim_input`), keeping per trigger (a set of (horse, skill)) the last snapshot before
+/// The run of `input` (`sim_input`), keeping per trigger (a set of (horse, skill), field order) the last snapshot before
 /// any of its skills first activated: one from before `tick::start` (passive skills activate in its first frame), then
 /// one every `FORK_EVERY` steps until every trigger fired. None = it never activated. A variant of `input` that differs
 /// only in those skills' effects (muted, swapped) is identical up to then, so `resume` from the snapshot gives the
 /// variant's run, bit for bit.
-pub(super) fn run_forking<'a>(race: &'a Race, input: &'a RaceInput, triggers: &[Vec<(usize, i32)>]) -> (Run, Vec<Option<Snap<'a>>>) {
-    let mut r = sim_race::init(input, &race.data);
+pub(super) fn run_forking<'a>(race: &'a Race, input: &'a SimInput, triggers: &[Vec<(usize, i32)>]) -> (Run, Vec<Option<Snap<'a>>>) {
+    // The sim's events name gates.
+    let gate = |h: usize| input.order.iter().position(|&u| u == h).unwrap_or(h);
+    let triggers: Vec<Vec<(usize, i32)>> = triggers.iter().map(|t| t.iter().map(|&(h, id)| (gate(h), id)).collect()).collect();
+    let mut r = sim_race::init(&input.input, &race.data);
     let mut snap = Snap::new((r.clone(), false));
     tick::start(&mut r);
     let mut forks = vec![None; triggers.len()];
     let (mut seen, mut steps, mut end) = (0, 0, false);
     while forks.iter().any(Option::is_none) {
         let new = &r.recorder.events[seen..];
-        for (f, t) in forks.iter_mut().zip(triggers).filter(|(f, _)| f.is_none()) {
+        for (f, t) in forks.iter_mut().zip(&triggers).filter(|(f, _)| f.is_none()) {
             // Skill event params: [horse, skill id, ..].
             if new.iter().any(|e| e.kind == event_kind::SKILL && e.params.len() >= 2 && t.contains(&(e.params[0] as usize, e.params[1]))) {
                 *f = Some(snap.clone());
@@ -149,32 +161,75 @@ pub(super) fn run_forking<'a>(race: &'a Race, input: &'a RaceInput, triggers: &[
         while !tick::step(&mut r) {}
     }
     tick::finish(&mut r);
-    (finish_run(r), forks)
+    (finish_run(r, &input.order), forks)
 }
 
-/// The run of `input` from a `run_forking` snapshot.
-pub(super) fn resume<'a>(snap: Snap<'a>, input: &'a RaceInput) -> Run {
+/// The run of `input` from a `run_forking` snapshot (the same gates).
+pub(super) fn resume<'a>(snap: Snap<'a>, input: &'a SimInput) -> Run {
     let (mut r, started) = Snap::try_unwrap(snap).unwrap_or_else(|s| (*s).clone());
-    r.input = input;
+    r.input = &input.input;
     if !started {
         tick::start(&mut r);
     }
     while !tick::step(&mut r) {}
     tick::finish(&mut r);
-    finish_run(r)
+    finish_run(r, &input.order)
 }
 
 /// `run_forking`'s snapshot interval in sim steps (1/15 s): a resumed run redoes at most this many. A clone costs ~6
 /// steps (mostly the horses' skill state), so sparse wins: measured fastest around 300 (20 s of race).
 const FORK_EVERY: usize = 300;
 
-/// `input` as `run_once` simulates it: custom races get popularity from the field.
-pub(super) fn sim_input<'a>(race: &Race, input: &'a RaceInput) -> std::borrow::Cow<'a, RaceInput> {
-    if race.replay.is_none() && input.horses.len() > 1 { std::borrow::Cow::Owned(custom_popularity(input)) } else { std::borrow::Cow::Borrowed(input) }
+/// A field as the sim runs it (`sim_input`): `input.horses[g]`, at gate `g + 1`, is the field's uma `order[g]`.
+pub(super) struct SimInput {
+    pub input: RaceInput,
+    pub order: Vec<usize>,
 }
 
-/// The `Run` of a finished sim race (after `tick::run`, or `tick::finish`).
-pub(super) fn finish_run(mut r: sim_race::Race) -> Run {
+/// `input` as the sim runs it: custom races get popularity from the field, then `draw` deals the gates (`run_drawn`).
+pub(super) fn sim_input(race: &Race, input: &RaceInput, draw: bool) -> SimInput {
+    let mut input = if race.replay.is_none() && input.horses.len() > 1 { custom_popularity(input) } else { input.clone() };
+    let n = input.horses.len();
+    let order = if draw { gate_order(input.random_seed, n) } else { (0..n).collect() };
+    input.horses = order.iter().map(|&u| input.horses[u].clone()).collect();
+    SimInput { input, order }
+}
+
+/// `v` per gate → per field uma (`SimInput::order`).
+fn by_uma<T>(v: Vec<T>, order: &[usize]) -> Vec<T> {
+    let mut v: Vec<(usize, T)> = order.iter().copied().zip(v).collect();
+    v.sort_by_key(|x| x.0);
+    v.into_iter().map(|x| x.1).collect()
+}
+
+/// A drawn race's output in field order: horse `g` (gate `g + 1`) becomes uma `order[g]` everywhere.
+fn ungate(out: &mut SimOutput, order: &[usize]) {
+    if order.iter().enumerate().all(|(g, &u)| g == u) {
+        return;
+    }
+    let uma = |g: i32| order.get(g as usize).map_or(g, |&u| u as i32);
+    for f in &mut out.frames {
+        f.horses = by_uma(std::mem::take(&mut f.horses), order);
+        for h in f.horses.iter_mut().filter(|h| h.block_front_horse_index >= 0) {
+            h.block_front_horse_index = uma(h.block_front_horse_index as i32) as i8;
+        }
+    }
+    out.results = by_uma(std::mem::take(&mut out.results), order);
+    for e in &mut out.events {
+        // Params: [horse, ..]; a skill event's [4] is its target flags, bit g = gate g + 1.
+        if let Some(h) = e.params.first_mut() {
+            *h = uma(*h);
+        }
+        if let (event_kind::SKILL, Some(t)) = (e.kind, e.params.get_mut(4)) {
+            *t = order.iter().enumerate().filter(|&(g, _)| *t >> g & 1 == 1).fold(0, |a, (_, &u)| a | 1 << u);
+        }
+    }
+    out.spans.iter_mut().for_each(|s| s.horse = order[s.horse]);
+    out.skill_spans.iter_mut().for_each(|s| s.horse = order[s.horse]);
+}
+
+/// The `Run` of a finished sim race (after `tick::run`, or `tick::finish`) of `SimInput::order`, in field order.
+pub(super) fn finish_run(mut r: sim_race::Race, order: &[usize]) -> Run {
     let seed = r.input.random_seed;
     let goal = r.info.phase_distances.course_distance;
     let final_leg = r.info.phase_distances.phase_end_start_distance;
@@ -201,8 +256,10 @@ pub(super) fn finish_run(mut r: sim_race::Race) -> Run {
             (h.is_hp_empty_on_race, h.hp.max(0.0), ai.last_spurt_target_speed, max_v, kind, need_hp)
         })
         .collect();
-    let mut checks: Vec<Vec<SkillCheck>> = (0..r.horses.len()).map(|i| skill_checks(&r, i)).collect();
-    let out = record::into_output(r);
+    let internals = by_uma(internals, order);
+    let mut checks: Vec<Vec<SkillCheck>> = by_uma((0..r.horses.len()).map(|i| skill_checks(&r, i)).collect(), order);
+    let mut out = record::into_output(r);
+    ungate(&mut out, order);
     let n = out.results.len();
     let frames = &out.frames;
     let fin: Vec<i32> = out.results.iter().map(|r| r.finish_order).collect();
@@ -346,7 +403,7 @@ pub fn margin_label(lengths: f32) -> String {
     T.iter().find(|t| lengths <= t.0).map_or("Large", |t| t.1).to_string()
 }
 
-/// Custom fields: distinct popularity 1..=n by total stats, ties by gate (the favourite is roughly the strongest horse).
+/// Custom fields: distinct popularity 1..=n by total stats, ties by field order (the favourite is roughly the strongest horse).
 /// `new_horse`'s shared 1 would satisfy every popularity skill condition for everyone.
 pub(super) fn custom_popularity(input: &RaceInput) -> RaceInput {
     let mut out = input.clone();

@@ -1,6 +1,6 @@
 use uma_race_sim::api::{RaceInput, WizAlt, mechanic, span_kind, wiz_mechanic};
 
-use super::{HorseRun, Race, SkillOutcome, Work, gap_lengths, par_map, run_once};
+use super::{HorseRun, Race, SkillOutcome, Work, gap_lengths, par_map, run_drawn};
 
 /// `wiz_mechanic` bits in order, as the Wit tab names them.
 pub const WIT_MECHANICS: [&str; wiz_mechanic::COUNT] = ["Section rolls", "Position keep", "Spurt candidates", "Skills", "Rushed", "Downhill", "Course bonus"];
@@ -73,7 +73,7 @@ pub fn wit(race: &Race, input: &RaceInput, i: usize, old_wiz: i32, seeds: &[i32]
             if mechanics != 0 {
                 inp.horses[i].wiz_alt = Some(WizAlt { wiz: new_wiz, mechanics });
             }
-            run_once(race, &inp)
+            run_drawn(race, &inp)
         };
         let a = run(0);
         masks
@@ -99,7 +99,7 @@ pub fn mechanics(race: &Race, input: &RaceInput, i: usize, seeds: &[i32], w: &Wo
             let mut inp = RaceInput { random_seed: seeds[s], ..input.clone() };
             inp.horses[i].viewer_id = 1; // dense frames near the goal (recording only), for `gap_lengths`
             inp.horses[i].muted_mechanics = muted;
-            run_once(race, &inp)
+            run_drawn(race, &inp)
         };
         let a = run(0);
         (0..mechanic::COUNT)
