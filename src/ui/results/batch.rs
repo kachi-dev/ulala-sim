@@ -3,18 +3,6 @@
 use super::*;
 use super::detail::horse_detail;
 
-/// Inline mini histogram of finishing places.
-fn mini_hist(h: &[f32]) -> Element {
-    let max = h.iter().cloned().fold(0.0001, f32::max);
-    rsx! {
-        div { class: "mini",
-            for (k, v) in h.iter().enumerate() {
-                div { title: "{k + 1}: {pct(*v)}", style: "height: {v / max * 100.0}%" }
-            }
-        }
-    }
-}
-
 /// Team win rates in a row: each team's tag, its members' icons, and the share of races one of them won.
 fn team_wr(res: &Res, cur: &Batch, base: Option<&Arc<Batch>>) -> Element {
     let ts = teams(&res.input, res.player);
@@ -121,17 +109,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                                                 }
                                             }
                                         }
-                                        td { class: "num",
-                                            if h.hp_out_rate < 1.0 {
-                                                div { class: "ok", "Survived" if h.hp_out_rate > 0.0 { " {pct(1.0 - h.hp_out_rate)}" } }
-                                            }
-                                            if h.hp_out_rate > 0.0 {
-                                                div { class: if h.hp_out_rate < 1.0 { "small no" } else { "no" },
-                                                    "Died" if h.hp_out_rate < 1.0 { " {pct(h.hp_out_rate)}" }
-                                                    if !h.hp_out_distances.is_empty() { " (-{res.cv.distance - dist(h.hp_out_distances.clone()).mean:.0}m)" }
-                                                }
-                                            }
-                                        }
+                                        td { class: "num", {hp_cell(h, res.cv.distance)} }
                                         for e in EVENTS.iter() {
                                             {
                                                 let (kind, more_good) = (e.kind, e.more_good);

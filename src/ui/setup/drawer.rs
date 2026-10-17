@@ -16,11 +16,28 @@ pub fn Picker() -> Element {
     let need = use_signal(Vec::new);
     let apt_min = use_signal(|| [0; 10]);
     let mins = use_signal(|| [0; 3]);
+    // Slot optimizer: on, the umas picked to race (results in `s.slot_res`).
+    let mut opt = use_signal(|| false);
+    let mut chosen = use_signal(Vec::<Cand>::new);
+    let mut opt_res = s.slot_res;
+    // The result row opened to show the whole uma.
+    let mut opt_open = use_signal(|| None::<String>);
+    let running = use_busy(s);
     if !*s.picker.read() {
         return rsx! {};
     }
     // Opened from the edit drawer: the pick replaces that uma instead of adding one.
     let replace = s.editing.cloned();
+    let n = s.input.read().horses.len();
+    let slot = replace.unwrap_or(n);
+    let size = run_size(s, n.max(slot + 1));
+    let opting = opt() && tab() > 0;
+    let picks = opting.then_some(chosen);
+    let n_picked = chosen.read().len();
+    let cv = s.cview.cloned();
+    let course = cv.as_ref().map_or(0.0, |c| c.distance);
+    // The course's surface and distance names (`key_apts`' labels are the same for every uma).
+    let apt_names = key_apts(&HorseInput::default(), cv.as_deref()).map(|a| a.0);
     let ql = q.read().to_lowercase();
     // Costumes grouped by character (cards() is sorted by name, then card id).
     let mut groups: Vec<(&str, i32, Vec<&CardInfo>)> = vec![];
@@ -40,6 +57,12 @@ pub fn Picker() -> Element {
                         button { class: if tab() == k { "on" }, onclick: move |_| tab.set(k), "{label}" }
                     }
                 }
+                if tab() > 0 {
+                    label { class: "check",
+                        input { r#type: "checkbox", checked: opt(), onchange: move |e| opt.set(e.checked()) }
+                        "Optimize slot"
+                    }
+                }
                 input {
                     r#type: "search",
                     placeholder: if tab() == 2 { "Search by name, uma or CM…" } else { "Search by name or costume…" },
@@ -49,10 +72,24 @@ pub fn Picker() -> Element {
                 }
                 button { class: "btn icon", title: "Close", onclick: move |_| s.picker.set(false), {icon("x")} }
             }
+            if opting {
+                div { class: "vet-bar",
+                    span { class: "muted small", "{n_picked} picked" }
+                    if n_picked > 0 { button { class: "btn ghost small", onclick: move |_| chosen.write().clear(), "Clear" } }
+                    button {
+                        class: "btn small",
+                        disabled: n_picked == 0 || running() || size.is_none(),
+                        onclick: move |_| optimize(s, chosen.cloned(), slot),
+                        "Race ×{OPT_RUNS}"
+                    }
+                    if size.is_none() { span { class: "warn", "{EMPTY_SLOTS}" } }
+                    Progress {}
+                }
+            }
             if tab() == 1 {
-                VeteranList { q: ql, sort, need, apt_min, mins, replace }
+                VeteranList { q: ql, sort, need, apt_min, mins, replace, picks }
             } else if tab() == 2 {
-                MyUmaList { q: ql, replace }
+                MyUmaList { q: ql, replace, picks }
             } else {
             div { class: "cgroups",
                 if groups.is_empty() { p { class: "muted", "No uma matches." } }
@@ -90,7 +127,187 @@ pub fn Picker() -> Element {
             }
             }
         }
+        if let Some(rows) = opt_res.cloned() {
+            div { class: "scrim top2", onclick: move |_| opt_res.set(None) }
+            div { class: "modal slot-res",
+                div { class: "drawer-h",
+                    div {
+                        h3 { "Slot optimizer" }
+                        div { class: "muted small",
+                            match replace.and_then(|i| s.input.read().horses.get(i).map(horse_name)) {
+                                Some(who) => format!("In place of {who} (gate {})", slot + 1),
+                                None => "Added to the field".to_string(),
+                            }
+                            " · {thousands(OPT_RUNS)} races each, same seeds"
+                        }
+                    }
+                    button { class: "btn icon", title: "Close", onclick: move |_| opt_res.set(None), {icon("x")} }
+                }
+                div { class: "drawer-b scroll-x",
+                    table { class: "grid results batch",
+                        thead {
+                            tr {
+                                th { class: "num", "#" }
+                                th {}
+                                th { "Uma" }
+                                th { "Style" }
+                                th { "{apt_names[0]}" }
+                                th { "{apt_names[1]}" }
+                                th { "Stats" }
+                                th { class: "num", "Win" }
+                                th { class: "c-hist", "Places 1 to {rows[0].1.place_hist.len()}" }
+                                th { class: "num", title: "Share of races with a full spurt: on time and at max speed", "Last spurt" }
+                                th { class: "num", title: "Share of races that kept HP to the goal; share that ran out, mean metres before the goal", "HP" }
+                                th { title: "Share of races each happened in, mean seconds when it did", "Events" }
+                            }
+                        }
+                        tbody {
+                            for (j, (c, h)) in rows.into_iter().enumerate() {
+                                tr {
+                                    key: "{c.key}",
+                                    class: if opt_open.read().as_ref() == Some(&c.key) { "sel" },
+                                    // Opens the whole uma right under it; clicking it again closes it.
+                                    onclick: {
+                                        let key = c.key.clone();
+                                        move |_| {
+                                            let open = opt_open.peek().as_ref() == Some(&key);
+                                            opt_open.set(if open { None } else { Some(key.clone()) });
+                                        }
+                                    },
+                                    td { class: "num", "{j + 1}" }
+                                    td {
+                                        button {
+                                            class: "btn small",
+                                            onclick: {
+                                                let (h, t) = (c.horse.clone(), c.trainer.clone());
+                                                move |e: MouseEvent| {
+                                                    e.stop_propagation();
+                                                    opt_res.set(None);
+                                                    chosen.write().clear();
+                                                    opt.set(false);
+                                                    place(s, h.clone(), t.clone(), replace);
+                                                }
+                                            },
+                                            "Pick"
+                                        }
+                                    }
+                                    td { class: "who",
+                                        div { class: "whobox",
+                                            {horse_icon(&c.horse, None, "sm")}
+                                            div {
+                                                b { "{c.name}" }
+                                                div { class: "muted small", "{c.sub}" }
+                                            }
+                                        }
+                                    }
+                                    {
+                                        let apts = key_apts(&c.horse, cv.as_deref());
+                                        rsx! {
+                                            td { span { class: "st", {style_badge(c.horse.running_style)} {apt_img(apts[2].1)} } }
+                                            td { {apt_img(apts[0].1)} }
+                                            td { {apt_img(apts[1].1)} }
+                                        }
+                                    }
+                                    td { {stat_cells(&c.horse)} }
+                                    td { class: "num",
+                                        b { "{pct(h.win_rate)}" }
+                                        div { class: "small muted", "avg place {h.place.mean:.2}" }
+                                    }
+                                    td { class: "c-hist", {mini_hist(&h.place_hist)} }
+                                    td { class: "num", b { "{pct(h.full_spurt_rate)}" } }
+                                    td { class: "num", {hp_cell(&h, course)} }
+                                    td {
+                                        div { class: "slot-ev",
+                                            for e in EVENTS.iter() {
+                                                {
+                                                    let (rate, secs) = h.states[e.kind as usize];
+                                                    rsx! {
+                                                        span { title: "{e.hint}", "{e.label}" }
+                                                        if rate > 0.0 {
+                                                            b { "{pct(rate)}" }
+                                                            span { "{secs:.1}s" }
+                                                        } else {
+                                                            b { class: "muted", "-" }
+                                                            span {}
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if opt_open.read().as_ref() == Some(&c.key) {
+                                    tr { key: "{c.key}-detail", class: "expand",
+                                        td { colspan: "12",
+                                            div { class: "slot-x",
+                                                div { class: "slot-card", {vc_body(&c.horse, &[])} }
+                                                div { {crate::ui::results::skill_activations(&h, &c.horse)} }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
+}
+
+/// Races each slot optimizer run takes per uma.
+const OPT_RUNS: usize = 1000;
+
+/// An uma picked for the slot optimizer, named as her card shows her.
+#[derive(Clone)]
+pub(in crate::ui) struct Cand {
+    key: String,
+    name: String,
+    sub: String,
+    horse: HorseInput,
+    trainer: String,
+}
+
+/// Picks `c` for the slot optimizer, or unpicks her.
+fn toggle_pick(mut picks: Signal<Vec<Cand>>, c: Cand) {
+    let mut v = picks.write();
+    match v.iter().position(|x| x.key == c.key) {
+        Some(k) => {
+            v.remove(k);
+        }
+        None => v.push(c),
+    }
+}
+
+/// Slot optimizer: each of `cands` at field index `slot` (added after the umas when past them), the setup as it runs
+/// otherwise, on the same `OPT_RUNS` drawn seeds; `s.slot_res` gets their stats there by win rate, best first.
+/// Nothing on Cancel.
+fn optimize(s: S, cands: Vec<Cand>, slot: usize) {
+    let Some(race) = s.race.cloned() else { return };
+    let setup = s.input.cloned();
+    let inputs: Vec<RaceInput> = cands
+        .iter()
+        .map(|c| {
+            let mut h = c.horse.clone();
+            h.skills.retain(|k| race.data.skills.contains_key(&k.skill_id));
+            let mut inp = setup.clone();
+            if slot < inp.horses.len() { inp.horses[slot] = h } else { inp.horses.push(h) }
+            filled(s, &race, &inp)
+        })
+        .collect();
+    let k = cands.len();
+    let work = k * OPT_RUNS * inputs[0].horses.len();
+    let run = move |w: &Work| {
+        let seeds = seeds(inputs[0].random_seed, OPT_RUNS);
+        let st: Vec<HorseStats> = inputs.iter().map(|inp| run_batch(&race, inp, &seeds, true, w).horses.swap_remove(slot)).collect();
+        (!w.cancel.load(Relaxed)).then_some(st)
+    };
+    measure(s, format!("Racing {k} umas × {OPT_RUNS} seeds"), k * OPT_RUNS, work, run, move |mut s, st| {
+        let Some(st) = st else { return };
+        let mut rows: Vec<(Cand, HorseStats)> = cands.into_iter().zip(st).collect();
+        rows.sort_by(|a, b| b.1.win_rate.total_cmp(&a.1.win_rate));
+        s.slot_res.set(Some(rows));
+    });
 }
 
 const VET_SORTS: [&str; 9] = ["Newest", "Oldest", "Rating", "SP", "Speed", "Stamina", "Power", "Guts", "Wit"];
@@ -124,6 +341,8 @@ fn VeteranList(
     /// Minimum rating, rank and speed; 0 = any.
     mut mins: Signal<[i32; 3]>,
     replace: Option<usize>,
+    /// Slot optimizer picks: a click picks the uma instead of adding her.
+    picks: Option<Signal<Vec<Cand>>>,
 ) -> Element {
     let s = use_context::<S>();
     let list = use_hook(|| Rc::new(load_veterans()));
@@ -283,11 +502,17 @@ fn VeteranList(
                     let title = card_title(h.card_id);
                     let day = v.created.get(..10).unwrap_or(&v.created).to_string();
                     let wins = h.single_mode_win_count;
+                    let sub = format!("{title} · {} · {day}", thousands(v.rating.max(0) as usize));
+                    let cand = Cand { key: format!("v{}", v.id), name: chara_name(h.chara_id), sub, horse: h.clone(), trainer: String::new() };
+                    let picked = picks.is_some_and(|p| p.read().iter().any(|x| x.key == cand.key));
                     rsx! {
                         div {
                             key: "{v.id}",
-                            class: "vcard",
-                            onclick: move |_| place(s, h.clone(), String::new(), replace),
+                            class: if picked { "vcard picked" } else { "vcard" },
+                            onclick: move |_| match picks {
+                                Some(p) => toggle_pick(p, cand.clone()),
+                                None => place(s, h.clone(), String::new(), replace),
+                            },
                             div { class: "vc-h",
                                 {uma_icon(v.horse.card_id, v.horse.chara_id, None, "md")}
                                 div { class: "vc-name",
@@ -329,7 +554,7 @@ fn place(mut s: S, mut h: HorseInput, trainer: String, replace: Option<usize>) {
 /// Umas saved by name as cards: search by name, uma or CM, a CM filter, the race's CM's first. Click adds (or
 /// replaces) the uma as saved, trainer name included. Mounted only while shown, so every opening reads them fresh.
 #[component]
-fn MyUmaList(q: String, replace: Option<usize>) -> Element {
+fn MyUmaList(q: String, replace: Option<usize>, picks: Option<Signal<Vec<Cand>>>) -> Element {
     let s = use_context::<S>();
     let mut list = use_signal(list_umas);
     // The uma whose Delete was clicked, asking to confirm; the CM filter (0 = all).
@@ -374,11 +599,22 @@ fn MyUmaList(q: String, replace: Option<usize>) -> Element {
                     let (h, trainer, p) = (u.horse.clone(), u.trainer.clone(), u.path.clone());
                     let asking = del.read().as_ref() == Some(&u.path);
                     let sub = [u.trainer.clone(), format!("saved {}", u.date)].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" · ");
+                    let cand = Cand {
+                        key: u.path.display().to_string(),
+                        name: u.name.clone(),
+                        sub: format!("{} {}", chara_name(h.chara_id), card_title(h.card_id)),
+                        horse: h.clone(),
+                        trainer: trainer.clone(),
+                    };
+                    let picked = picks.is_some_and(|p| p.read().iter().any(|x| x.key == cand.key));
                     rsx! {
                         div {
                             key: "{u.path.display()}",
-                            class: "vcard",
-                            onclick: move |_| place(s, h.clone(), trainer.clone(), replace),
+                            class: if picked { "vcard picked" } else { "vcard" },
+                            onclick: move |_| match picks {
+                                Some(p) => toggle_pick(p, cand.clone()),
+                                None => place(s, h.clone(), trainer.clone(), replace),
+                            },
                             div { class: "vc-h",
                                 {uma_icon(u.horse.card_id, u.horse.chara_id, None, "md")}
                                 div { class: "vc-name",
@@ -416,24 +652,42 @@ fn MyUmaList(q: String, replace: Option<usize>) -> Element {
     }
 }
 
+/// `h`'s five stats: each stat's icon over its rank and value.
+fn stat_cells(h: &HorseInput) -> Element {
+    let st = stats(h);
+    rsx! {
+        div { class: "vc-stats",
+            for k in 0..5 {
+                div {
+                    img { class: "vc-si", src: "/a/stat/{k}.png", alt: "{STATS_SHORT[k]}" }
+                    {rank_img(stat_rank(st[k]), "vc-sr")}
+                    b { "{st[k]}" }
+                }
+            }
+        }
+    }
+}
+
+/// Aptitude grade `g` as the game's letter icon (bold text when it has none).
+fn apt_img(g: i32) -> Element {
+    rsx! {
+        if (1..=8).contains(&g) {
+            img { class: "apt-i", src: "/a/apt/{g}.png", alt: "{grade(g)}" }
+        } else {
+            b { "{grade(g)}" }
+        }
+    }
+}
+
 /// A veteran or saved uma card's body: stats with their ranks, aptitudes (with SP), skills in the game's order
 /// (`need` ones marked).
 fn vc_body(h: &HorseInput, need: &[i32]) -> Element {
-    let st = stats(h);
     let apts = vet_apts(h);
     let sp = skills_sp(&h.skills);
     let sk: Vec<(SkillInfo, i32)> = game_order(&h.skills).into_iter().map(|(_, k)| (skill_info(k.skill_id), k.level)).collect();
     let pref = (h.running_style - 1) as usize;
     rsx! {
-                            div { class: "vc-stats",
-                                for k in 0..5 {
-                                    div {
-                                        img { class: "vc-si", src: "/a/stat/{k}.png", alt: "{STATS_SHORT[k]}" }
-                                        {rank_img(stat_rank(st[k]), "vc-sr")}
-                                        b { "{st[k]}" }
-                                    }
-                                }
-                            }
+                            {stat_cells(h)}
                             div { class: "vc-apts",
                                 for (_, off, names) in APT_ROWS {
                                     div { class: "vc-apt-row",
@@ -441,11 +695,7 @@ fn vc_body(h: &HorseInput, need: &[i32]) -> Element {
                                             span {
                                                 class: if off == 6 && j == pref { "pref" },
                                                 "{n}"
-                                                if (1..=8).contains(&apts[off + j]) {
-                                                    img { src: "/a/apt/{apts[off + j]}.png", alt: "{grade(apts[off + j])}" }
-                                                } else {
-                                                    b { "{grade(apts[off + j])}" }
-                                                }
+                                                {apt_img(apts[off + j])}
                                             }
                                         }
                                         if off == 0 { span { "SP" b { "{thousands(sp.max(0) as usize)}" } } }

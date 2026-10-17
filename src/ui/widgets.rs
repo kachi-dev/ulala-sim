@@ -54,6 +54,33 @@ pub(super) fn style_badge(style: i32) -> Element {
     }
 }
 
+/// Inline mini histogram of finishing places.
+pub(super) fn mini_hist(h: &[f32]) -> Element {
+    let max = h.iter().cloned().fold(0.0001, f32::max);
+    rsx! {
+        div { class: "mini",
+            for (k, v) in h.iter().enumerate() {
+                div { title: "{k + 1}: {pct(*v)}", style: "height: {v / max * 100.0}%" }
+            }
+        }
+    }
+}
+
+/// HP to the goal over a batch: the share that survived, the share that died and how far out (course `distance` m).
+pub(super) fn hp_cell(h: &HorseStats, distance: f32) -> Element {
+    rsx! {
+        if h.hp_out_rate < 1.0 {
+            div { class: "ok", "Survived" if h.hp_out_rate > 0.0 { " {pct(1.0 - h.hp_out_rate)}" } }
+        }
+        if h.hp_out_rate > 0.0 {
+            div { class: if h.hp_out_rate < 1.0 { "small no" } else { "no" },
+                "Died" if h.hp_out_rate < 1.0 { " {pct(h.hp_out_rate)}" }
+                if !h.hp_out_distances.is_empty() { " (-{distance - dist(h.hp_out_distances.clone()).mean:.0}m)" }
+            }
+        }
+    }
+}
+
 /// The picture `horse_icon` shows (path under /a/), None when it shows the initial.
 pub(super) fn portrait(h: &HorseInput) -> Option<String> {
     let mob = format!("mob/{}.png", h.mob_id);

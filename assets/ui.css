@@ -975,3 +975,24 @@ svg.luckchart .end.sim { fill: var(--accent-2-ink); }
 .rp-ev svg { width: 16px; height: 16px; margin-top: 1px; }
 .rp-ev > span:last-child span { font-weight: 800; }
 .rp-now { height: 2px; margin: 4px 6px; background: var(--accent); border-radius: 1px; }
+
+/* Slot optimizer (Add uma) */
+.drawer-h .check input { flex: none; }
+.vcard.picked { border-color: var(--accent); background: var(--accent-soft); }
+.scrim.top2 { z-index: 13; }
+.modal.slot-res { z-index: 14; width: min(1700px, 96vw); }
+.slot-ev { display: grid; grid-template-columns: auto auto auto; gap: 0 10px; font-size: 12px; line-height: 1.35; white-space: nowrap; }
+.slot-ev > span:nth-child(3n + 1) { color: var(--muted); }
+.slot-ev > b { text-align: right; }
+.slot-ev > span:nth-child(3n) { color: var(--muted); text-align: right; }
+.slot-res .st { display: flex; align-items: center; gap: 2px; }
+.slot-res tr:not(.expand) .apt-i { display: block; width: 20px; height: 22px; object-fit: contain; }
+.slot-res .vc-stats { width: 290px; }
+.slot-res .vc-stats div { background: var(--surface-2); }
+.slot-x { display: grid; grid-template-columns: minmax(0, 640px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.slot-card { display: flex; flex-direction: column; gap: 6px; }
+.slot-x .vc-stats { width: auto; }
+.slot-x .grid tbody tr { cursor: default; }
+.slot-x .grid td { padding: 2px 8px; }
+.slot-x .grid td:last-child { width: 45%; }
+.slot-x .vc-stats div { background: var(--surface); }

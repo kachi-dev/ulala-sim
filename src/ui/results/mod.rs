@@ -9,7 +9,7 @@ mod single;
 use super::*;
 use batch::batch_view;
 use single::single_view;
-pub(super) use detail::{spurt_and_hp, spurt_style};
+pub(super) use detail::{skill_activations, spurt_and_hp, spurt_style};
 pub(super) use replay::ReplayModal;
 
 #[component]

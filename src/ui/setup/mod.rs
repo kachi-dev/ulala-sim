@@ -11,6 +11,7 @@ use super::*;
 use crate::charts::{Band, Bins, CourseProfile, Region, SkillMark};
 use course::CourseCard;
 pub use drawer::{Drawer, Picker};
+pub(super) use drawer::Cand;
 pub use npcs::NpcDrawer;
 use field::FieldCard;
 use run::RunBar;

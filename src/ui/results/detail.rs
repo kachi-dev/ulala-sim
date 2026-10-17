@@ -166,11 +166,7 @@ pub(super) fn horse_detail(
                 crate::ui::mechanics::MechanicsOut { i }
             }
             if tab == DetailTab::Skills {
-                div { class: "olegend muted small",
-                    for k in OutcomeKind::ALL {
-                        span { title: "{k.hint()}", i { class: outcome_class(k) } "{k.label()}" }
-                    }
-                }
+                {outcome_legend()}
                 div { class: "cols",
                     table { class: "grid",
                         thead {
@@ -285,6 +281,48 @@ pub(in crate::ui) fn outcome_class(k: OutcomeKind) -> &'static str {
         OutcomeKind::WitCheck => "o-wit",
         OutcomeKind::CantHere => "o-cant",
         OutcomeKind::NotMet => "o-notmet",
+    }
+}
+
+/// Legend of `outcome_bar`'s colours.
+fn outcome_legend() -> Element {
+    rsx! {
+        div { class: "olegend muted small",
+            for k in OutcomeKind::ALL {
+                span { title: "{k.hint()}", i { class: outcome_class(k) } "{k.label()}" }
+            }
+        }
+    }
+}
+
+/// Uma `horse`'s skills over batch stats `h` (her skills in the game's order, then anything else she activated): how
+/// often each activated and why it didn't, with the legend.
+pub(in crate::ui) fn skill_activations(h: &HorseStats, horse: &HorseInput) -> Element {
+    let mut ids: Vec<i32> = game_order(&horse.skills).into_iter().map(|(_, k)| k.skill_id).collect();
+    ids.extend(h.skills.iter().map(|k| k.skill_id).filter(|id| !horse.skills.iter().any(|k| k.skill_id == *id)));
+    let stat = |id: i32| h.skills.iter().find(|k| k.skill_id == id);
+    rsx! {
+        {outcome_legend()}
+        table { class: "grid",
+            thead {
+                tr {
+                    th { "Skill" }
+                    th { class: "num", "Activates" }
+                    th { "Outcomes" }
+                }
+            }
+            tbody {
+                for id in ids {
+                    tr { key: "{id}",
+                        td { {skill_row(&skill_info(id), None, "")} }
+                        td { class: "num", "{pct(stat(id).map_or(0.0, |k| k.rate))}" }
+                        td {
+                            if let Some(k) = stat(id) { div { class: "oline", {outcome_bar(&k.outcomes)} } }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

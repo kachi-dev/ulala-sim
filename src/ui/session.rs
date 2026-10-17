@@ -31,6 +31,7 @@ fn install(mut s: S, (race, all, courses, cv): Loaded) {
     s.sel.set(0);
     s.r_res.set(None);
     s.r_sel.set(None);
+    s.slot_res.set(None);
     s.saved_race.set(None);
     s.race.set(Some(race));
 }

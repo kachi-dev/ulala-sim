@@ -259,6 +259,8 @@ struct S {
     r_sort: Signal<(ranking::RankCol, bool)>,
     r_sel: Signal<Option<(i32, i32)>>,
     r_matrix: Signal<bool>,
+    /// Slot optimizer results (the Add uma picker's), best first. Here, not in the picker: its job ends on the App scope.
+    slot_res: Signal<Option<Vec<(setup::Cand, HorseStats)>>>,
     // Stamina subtab of the batch uma detail
     /// Seeds for the stamina calculation (its own count, not the batch's).
     st_n: Signal<usize>,
@@ -364,6 +366,7 @@ pub fn App() -> Element {
         r_sort: use_signal(|| (ranking::RankCol::Mean, true)),
         r_sel: use_signal(|| None),
         r_matrix: use_signal(|| true),
+        slot_res: use_signal(|| None),
         st_n: use_signal(|| 500),
         st_res: use_signal(|| None),
         st_dsel: use_signal(|| None),
