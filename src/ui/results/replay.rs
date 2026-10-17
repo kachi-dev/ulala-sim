@@ -323,10 +323,13 @@ fn Replay() -> Element {
         (None, Cam::Track) => fit([(b[0], b[1]), (b[2], b[3])].into_iter(), aspect, 0.0, extent * 0.12),
         // On the middle uma by distance, wide enough for everyone: the box around the whole field can sit on empty
         // track between two groups once it strings out, and a zoom or pan kept relative to it drifts off the racers.
+        // The middle distance at the field's mean lane, not the middle uma's point: that snaps a lane over when two
+        // umas swap the middle place.
         (None, Cam::Field) => {
-            let mut by_d: Vec<usize> = (0..n).collect();
-            by_d.sort_by(|&a, &b| hs[a].distance.total_cmp(&hs[b].distance));
-            let c = pos[by_d[n / 2]];
+            let mut ds: Vec<f32> = hs.iter().map(|h| h.distance).collect();
+            ds.sort_by(f32::total_cmp);
+            let lane = hs.iter().map(|h| h.lane_position).sum::<f32>() / n as f32;
+            let c = tr.at(ds[n / 2], lane);
             let (hx, hy) = pos.iter().fold((0f32, 0f32), |(hx, hy), p| (hx.max((p.0 - c.0).abs()), hy.max((p.1 - c.1).abs())));
             (c.0, c.1, (2.0 * hx).max(2.0 * hy * aspect).max(40.0 * m) + 24.0 * m)
         }
