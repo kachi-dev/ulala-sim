@@ -3,7 +3,7 @@
 
 use super::*;
 use std::rc::Rc;
-use dioxus::html::geometry::WheelDelta;
+use dioxus::html::geometry::{ClientPoint, WheelDelta};
 use std::time::Instant;
 use uma_race_sim::api::{Span, span_kind};
 
@@ -15,6 +15,8 @@ const FOLLOW_M: f32 = 60.0;
 const MIN_M: f32 = 15.0;
 /// Blocks this short (s) or shorter are left out: brushes, not blocks.
 const MIN_BLOCK: f32 = 0.2;
+/// The track's drawing order follows the field in steps of this (m).
+const FOCUS_M: f32 = 25.0;
 /// Skill effect totals show under the umas only in views narrower than this (m): wider, they pile up.
 const FX_M: f32 = 200.0;
 
@@ -101,36 +103,95 @@ fn badge(st: St, x: f32, y: f32, r: f32) -> Element {
 }
 
 /// Each race phase's tint over the course surface (`PHASES` order; none for the early race): colour, opacity.
-const PHASE_TINT: [(&str, f32); 4] = [("none", 0.0), ("var(--accent-2)", 0.22), ("var(--accent)", 0.3), ("var(--accent)", 0.55)];
+const PHASE_COLOR: [&str; 4] = ["var(--ph-early)", "var(--ph-mid)", "var(--ph-late)", "var(--ph-spurt)"];
 
-/// The course, drawn once: surface and rails of the track's overrun loop and of the race's path, and their extent.
+/// Length of a track piece (m): the course is drawn in pieces so the stretch the field is on can go on top.
+const PIECE_M: f32 = 50.0;
+
+/// A stretch of the race's path or of the overrun loop: course distances, surface (the mid-lane line, stroked the
+/// track's width) and rails, their colours (the ground; the rails in the race phase's), and its race phase (None for
+/// the faint overrun loop).
+#[derive(PartialEq)]
+struct Piece {
+    from: f32,
+    to: f32,
+    surface: String,
+    rails: String,
+    color: String,
+    rail: &'static str,
+    phase: Option<usize>,
+}
+
+/// `Geo::pieces`, compared by identity (a prop compared every frame).
+#[derive(Clone)]
+struct Pieces(Rc<Vec<Piece>>);
+
+impl PartialEq for Pieces {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// The course: the race's path and the overrun loop in pieces, points along them for `Geo::covered`, and the extent.
+/// A course can cross or run over itself (a start on the home straight, a 2nd lap), so what is on top depends on
+/// where the field is.
 struct Geo {
     track: Track,
-    /// [loop, course] × (surface, rails). The loop can sit beside the course (an inner / outer course), so the course
-    /// is drawn over it.
-    paths: [(String, String); 2],
-    /// The course's mid-lane line per race phase (`PHASE_TINT`).
-    phases: [String; 4],
+    pieces: Pieces,
+    /// (course distance, mid-lane point) every 10 m along every piece.
+    samples: Vec<(f32, (f32, f32))>,
     /// min x, min y, max x, max y.
     bounds: [f32; 4],
 }
 
 fn geo(race: &Race, input: &RaceInput, phases: [f32; 4]) -> Geo {
     let track = track(race, input);
-    let w = track.width;
+    let (w, goal) = (track.width, track.goal);
+    // One colour for turf and dirt courses.
+    let ground = "var(--track)";
+    let end = track.loop_span.map_or(goal, |l| l.1);
+    // Cut every `PIECE_M`, at each phase start and at the goal.
+    let mut cuts: Vec<f32> = (0..=(end / PIECE_M) as usize).map(|k| k as f32 * PIECE_M).chain(phases).chain([goal, end]).collect();
+    cuts.retain(|&d| (0.0..=end).contains(&d));
+    cuts.sort_by(f32::total_cmp);
+    cuts.dedup_by(|a, b| (*a - *b).abs() < 1.0);
     let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
-    let mut draw = |span: Option<(f32, f32)>| {
-        let Some((from, to)) = span else { return Default::default() };
-        let rails = [0.0, w].map(|lane| track.line(from, to, lane, 2.0));
-        for &(x, y) in rails.iter().flatten() {
-            b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
-        }
-        (path_d(&track.line(from, to, w / 2.0, 2.0)), rails.iter().map(|r| path_d(r)).collect())
+    // The loop only where the race's path isn't: next to it, it peeks out from under the path's rails.
+    let near = w * 11.25;
+    let path: Vec<(f32, f32)> = track.line(0.0, goal, w / 2.0, 10.0);
+    let on_path = |from: f32, to: f32| {
+        let pts = track.line(from, to, w / 2.0, 10.0);
+        let hits = pts.iter().filter(|p| path.iter().any(|q| (p.0 - q.0).hypot(p.1 - q.1) < near)).count();
+        hits * 2 >= pts.len()
     };
-    let paths = [draw(track.loop_span), draw(Some((0.0, track.goal)))];
-    let ends = [phases[1], phases[2], phases[3], track.goal];
-    let phases = std::array::from_fn(|k| path_d(&track.line(phases[k], ends[k].max(phases[k]), w / 2.0, 2.0)));
-    Geo { track, paths, phases, bounds: b }
+    let pieces = cuts
+        .windows(2)
+        .filter(|c| c[0] < goal || !on_path(c[0], c[1]))
+        .map(|c| {
+            let (from, to) = (c[0], c[1]);
+            let rails = [0.0, w].map(|lane| track.line(from, to, lane, 2.0));
+            for &(x, y) in rails.iter().flatten() {
+                b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
+            }
+            let phase = (from < goal).then(|| phases.iter().rposition(|&p| from >= p).unwrap_or(0));
+            let color = if phase.is_none() { format!("color-mix(in srgb, {ground} 45%, var(--surface-2))") } else { ground.to_string() };
+            let rail = phase.map_or("var(--ink)", |k| PHASE_COLOR[k]);
+            // 1 m over each neighbour: no anti-aliasing seam between pieces (the colours are opaque).
+            let surface = path_d(&track.line((from - 1.0).max(0.0), (to + 1.0).min(end), w / 2.0, 2.0));
+            Piece { from, to, surface, rails: rails.iter().map(|r| path_d(r)).collect(), color, rail, phase }
+        })
+        .collect();
+    let samples = (0..=(end / 10.0) as usize).map(|k| k as f32 * 10.0).map(|d| (d, track.at(d, w / 2.0))).collect();
+    Geo { track, pieces: Pieces(Rc::new(pieces)), samples, bounds: b }
+}
+
+impl Geo {
+    /// The course at distance `d` lies under another stretch nearer to `focus` (m): a lap apart, on top of each other.
+    fn covered(&self, d: f32, focus: f32) -> bool {
+        let p = self.track.at(d, self.track.width / 2.0);
+        let near = self.track.width * 11.25;
+        self.samples.iter().any(|&(e, q)| (e - d).abs() > 150.0 && (e - focus).abs() < (d - focus).abs() && (q.0 - p.0).hypot(q.1 - p.1) < near)
+    }
 }
 
 fn path_d(pts: &[(f32, f32)]) -> String {
@@ -199,6 +260,19 @@ fn Replay() -> Element {
     // A drag on the map: where it started (client px), the pan then, and whether it moved (else it is a click).
     let mut drag = use_signal(|| None::<(f64, f64, (f32, f32), bool)>);
     let mut size = use_signal(|| (0.0f32, 0.0f32));
+    // The stage element and its top-left in client px: the cursor's map point from client coordinates, whatever
+    // element (an overlay, a marker) is under it.
+    let mut stage = use_signal(|| None::<Rc<MountedData>>);
+    let mut origin = use_signal(|| (0.0f64, 0.0f64));
+    let locate = move || {
+        spawn(async move {
+            if let Some(el) = stage.peek().clone()
+                && let Ok(r) = el.get_client_rect().await
+            {
+                origin.set((r.origin.x, r.origin.y));
+            }
+        });
+    };
     use_future(move || async move {
         let mut last = Instant::now();
         loop {
@@ -247,7 +321,15 @@ fn Replay() -> Element {
     let (cx0, cy0, base) = match (fol, cam()) {
         (Some(i), _) => (pos[i].0, pos[i].1, FOLLOW_M * m),
         (None, Cam::Track) => fit([(b[0], b[1]), (b[2], b[3])].into_iter(), aspect, 0.0, extent * 0.12),
-        (None, Cam::Field) => fit(pos.iter().copied(), aspect, 40.0 * m, 24.0 * m),
+        // On the middle uma by distance, wide enough for everyone: the box around the whole field can sit on empty
+        // track between two groups once it strings out, and a zoom or pan kept relative to it drifts off the racers.
+        (None, Cam::Field) => {
+            let mut by_d: Vec<usize> = (0..n).collect();
+            by_d.sort_by(|&a, &b| hs[a].distance.total_cmp(&hs[b].distance));
+            let c = pos[by_d[n / 2]];
+            let (hx, hy) = pos.iter().fold((0f32, 0f32), |(hx, hy), p| (hx.max((p.0 - c.0).abs()), hy.max((p.1 - c.1).abs())));
+            (c.0, c.1, (2.0 * hx).max(2.0 * hy * aspect).max(40.0 * m) + 24.0 * m)
+        }
     };
     let (zmin, zmax) = (MIN_M * m / base, extent * 1.5 / base);
     let z = zoom().clamp(zmin, zmax.max(zmin));
@@ -256,7 +338,8 @@ fn Replay() -> Element {
     let (cx, cy) = (cx0 + pan().0, cy0 + pan().1);
     // World units per screen px: markers and labels keep their screen size at any zoom.
     let ppx = if sw > 0.0 { vw / sw } else { vw / 900.0 };
-    let to_world = move |x: f64, y: f64| (cx - vw / 2.0 + x as f32 * ppx, cy - vh / 2.0 + y as f32 * ppx);
+    let (ox, oy) = origin();
+    let to_world = move |p: ClientPoint| (cx - vw / 2.0 + (p.x - ox) as f32 * ppx, cy - vh / 2.0 + (p.y - oy) as f32 * ppx);
     let r = (0.9 * m).clamp(9.0 * ppx, 24.0 * ppx);
     let font = 12.0 * ppx;
 
@@ -275,8 +358,12 @@ fn Replay() -> Element {
     };
 
     let w = tr.width;
+    // Where the field is: what it is on goes on top (in `FOCUS_M` steps, so the track redraws only that often).
+    let focus = fol.map_or_else(|| (hs.iter().map(|h| h.distance).fold(f32::MAX, f32::min) + lead) / 2.0, |i| hs[i].distance);
+    let focus = (focus / FOCUS_M).round() * FOCUS_M;
+    let focus_phase = res.cv.phases.iter().rposition(|&p| focus >= p).unwrap_or(0);
     // Marks every 200 m (but next to a phase start), the phase starts, the start and the goal: (label, accent, rail
-    // point, outer rail point, label point just outside).
+    // point, outer rail point, label point just outside). Not where the course lies under the stretch the field is on.
     let ph = res.cv.phases;
     let near_phase = |d: f32| ph[1..].iter().any(|&p| (p - d).abs() < 30.0);
     let marks: Vec<(String, bool, (f32, f32), (f32, f32), (f32, f32))> = (0..=(run.goal / 200.0) as usize)
@@ -284,6 +371,7 @@ fn Replay() -> Element {
         .filter(|&(d, _)| d < run.goal && (d == 0.0 || !near_phase(d)))
         .chain((1..4).filter(|&k| ph[k] > 0.0 && ph[k] < run.goal).map(|k| (ph[k], Some(k))))
         .chain([(run.goal, None)])
+        .filter(|&(d, _)| !geo.covered(d, focus))
         .map(|(d, phase)| {
             let label = match phase {
                 Some(k) => format!("{} {d:.0}m", PHASES[k]),
@@ -297,7 +385,6 @@ fn Replay() -> Element {
         })
         .collect();
     let lead_phase = PHASES[ph.iter().rposition(|&p| lead >= p).unwrap_or(0)];
-    let turf = if tr.ground == 2 { "var(--dirt)" } else { "var(--turf)" };
     let draw: Vec<usize> = (0..n).filter(|&i| Some(i) != fol).chain(fol).collect();
     // Under each uma: a strip of her states' icons, then the skill effects on her now, summed (speed, then
     // acceleration; a line only when non-zero). Per uma: the strip (x, y, width, height; empty without states), its
@@ -364,10 +451,15 @@ fn Replay() -> Element {
                 div { class: "rp-left",
                     div {
                         class: if drag().is_some_and(|d| d.3) { "rp-stage grabbing" } else { "rp-stage" },
+                        onmounted: move |e| {
+                            stage.set(Some(e.data()));
+                            locate();
+                        },
                         onresize: move |e| {
                             if let Ok(b) = e.get_content_box_size() {
                                 size.set((b.width as f32, b.height as f32));
                             }
+                            locate();
                         },
                         onwheel: move |e| {
                             e.prevent_default();
@@ -379,8 +471,7 @@ fn Replay() -> Element {
                             // The point under the cursor stays put.
                             let nz = (z * 1.0015f32.powf(dy)).clamp(zmin, zmax.max(zmin));
                             let k = nz / z;
-                            let p = e.element_coordinates();
-                            let (wx, wy) = to_world(p.x, p.y);
+                            let (wx, wy) = to_world(e.client_coordinates());
                             let (px, py) = pan();
                             zoom.set(nz);
                             pan.set((px + (wx - cx) * (1.0 - k), py + (wy - cy) * (1.0 - k)));
@@ -402,8 +493,7 @@ fn Replay() -> Element {
                         onmouseup: move |e| {
                             // A click (no drag) on an uma follows her.
                             if let Some((.., false)) = drag() {
-                                let p = e.element_coordinates();
-                                let (wx, wy) = to_world(p.x, p.y);
+                                let (wx, wy) = to_world(e.client_coordinates());
                                 let hit = (0..pos.len())
                                     .map(|i| (i, (pos[i].0 - wx).hypot(pos[i].1 - wy)))
                                     .filter(|&(_, d)| d < r * 1.4)
@@ -416,7 +506,7 @@ fn Replay() -> Element {
                         },
                         onmouseleave: move |_| drag.set(None),
                         svg { view_box: "{cx - vw / 2.0} {cy - vh / 2.0} {vw} {vh}",
-                            TrackBase { paths: geo.paths.clone(), phases: geo.phases.clone(), width: w * 11.25, fill: turf }
+                            TrackBase { pieces: geo.pieces.clone(), focus, phase: focus_phase, width: w * 11.25 }
                             for (label , goal , a , b , l) in marks {
                                 {
                                     rsx! {
@@ -540,7 +630,7 @@ fn Replay() -> Element {
                             div { class: "rp-mini", onmousedown: |e| e.stop_propagation(),
                                 div { class: "muted small", "Whole track · box = this view" }
                                 svg { view_box: "{b[0] - extent * 0.04} {b[1] - extent * 0.04} {b[2] - b[0] + extent * 0.08} {b[3] - b[1] + extent * 0.08}",
-                                    TrackBase { paths: geo.paths.clone(), phases: geo.phases.clone(), width: w * 11.25 * 2.5, fill: turf }
+                                    TrackBase { pieces: geo.pieces.clone(), focus, phase: focus_phase, width: w * 11.25 * 2.5 }
                                     for i in 0..n {
                                         circle { r: "{extent / 90.0}", cx: "{pos[i].0}", cy: "{pos[i].1}", fill: "{res.colors[i]}" }
                                     }
@@ -589,8 +679,7 @@ fn Replay() -> Element {
                             }
                             div { class: "rp-phases", title: "Race phases, as the leader reached them",
                                 for (k , (a , b)) in phase_t.iter().zip(phase_t.iter().skip(1).chain([&end])).enumerate() {
-                                    span { style: "left: {a / end * 100.0}%; width: {(b - a).max(0.0) / end * 100.0}%; background: {turf}",
-                                        i { style: "background: {PHASE_TINT[k].0}; opacity: {PHASE_TINT[k].1}" }
+                                    span { style: "left: {a / end * 100.0}%; width: {(b - a).max(0.0) / end * 100.0}%; background: {PHASE_COLOR[k]}",
                                         b { "{PHASES[k]}" }
                                     }
                                 }
@@ -746,20 +835,39 @@ fn Feed(evs: Rc<Vec<Ev>>, past: usize, follow: Option<usize>, names: Rc<Vec<Stri
     }
 }
 
-/// `Geo::paths`, the loop faint, the course tinted by race phase: unchanged while the camera and the umas move, so it
-/// renders once.
+/// `Geo::pieces`, farthest from `focus` (m) first, so the stretch the field is on is drawn last, on top; the rails
+/// bright in race phase `phase` (the field's), dim in the others. Redraws only when `focus` moves a step.
 #[component]
-fn TrackBase(paths: [(String, String); 2], phases: [String; 4], width: f32, fill: &'static str) -> Element {
+fn TrackBase(pieces: Pieces, focus: f32, phase: usize, width: f32) -> Element {
+    let gap = |p: &Piece| if (p.from..=p.to).contains(&focus) { 0.0 } else { (p.from - focus).abs().min((p.to - focus).abs()) };
+    let mut order: Vec<&Piece> = pieces.0.iter().collect();
+    order.sort_by(|a, b| gap(b).total_cmp(&gap(a)));
     rsx! {
-        for (k , (surface , rails)) in paths.into_iter().enumerate() {
-            g { opacity: if k == 0 { ".45" } else { "1" },
-                path { d: "{surface}", fill: "none", stroke: fill, stroke_width: "{width}", stroke_linejoin: "round" }
-                if k == 1 {
-                    for (d , (tint , op)) in phases.iter().zip(PHASE_TINT).skip(1) {
-                        path { d: "{d}", fill: "none", stroke: tint, stroke_opacity: "{op}", stroke_width: "{width}" }
+        g {
+            for p in order {
+                g { key: "{p.from}",
+                    path {
+                        d: "{p.surface}",
+                        fill: "none",
+                        style: "stroke: {p.color}",
+                        stroke_width: "{width}",
+                        stroke_linejoin: "round",
+                    }
+                    path {
+                        d: "{p.rails}",
+                        fill: "none",
+                        stroke: p.rail,
+                        stroke_opacity: match p.phase {
+                            None => ".25",
+                            Some(k) if k == phase => "1",
+                            Some(_) => ".3",
+                        },
+                        stroke_width: if p.phase.is_some() { "3" } else { "1" },
+                        // Round ends overlap the next piece's: no notch at the joins.
+                        stroke_linecap: if p.phase.is_some() { "round" } else { "butt" },
+                        vector_effect: "non-scaling-stroke",
                     }
                 }
-                path { d: "{rails}", fill: "none", stroke: "var(--ink)", stroke_opacity: ".55", stroke_width: "1", vector_effect: "non-scaling-stroke" }
             }
         }
     }

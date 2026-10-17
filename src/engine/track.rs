@@ -15,8 +15,6 @@ pub struct Track {
     pub goal: f32,
     /// World units per course metre on lane 0.
     pub metre: f32,
-    /// 1 turf, 2 dirt.
-    pub ground: i32,
     /// The track's overrun loop as (from, to) course distances: the path past the main one. None without a loop.
     pub loop_span: Option<(f32, f32)>,
 }
@@ -30,7 +28,6 @@ pub fn track(race: &Race, input: &RaceInput) -> Track {
         width: r.info.lane_distance_max,
         goal: r.info.race_course_set.distance as f32,
         metre: r.world_per_metre,
-        ground: r.info.race_course_set.ground,
         lane: r.course_lane,
     }
 }

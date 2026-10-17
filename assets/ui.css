@@ -35,7 +35,9 @@
   --on-accent-2: #082537;
   --danger: #e2544c;
   --sk-speed: #f3c24b;
-  --turf: #2f5a3a; --dirt: #5e4532;
+  --track: #4c3060;
+  /* Race phases: the replay track's rails, the timeline's phase bar. */
+  --ph-early: #6ee7a8; --ph-mid: #6cc4ff; --ph-late: #ff8ec6; --ph-spurt: #d98cff;
   --sk-accel: #ff8a5c;
   color-scheme: dark;
 }
@@ -68,7 +70,8 @@
   --on-accent: #3a0a22;
   --on-accent-2: #082537;
   --danger: #d9433b;
-  --turf: #a9d3a4; --dirt: #dcc3a0;
+  --track: #dcc6e8;
+  --ph-early: #6ee7a8; --ph-mid: #6cc4ff; --ph-late: #ff8ec6; --ph-spurt: #d98cff;
   --sk-speed: #c98d00;
   --sk-accel: #e2602c;
   color-scheme: light;
@@ -921,6 +924,7 @@ svg.luckchart .end.sim { fill: var(--accent-2-ink); }
 .rp-stage { position: relative; flex: 1; min-height: 0; border-radius: 12px; overflow: hidden; background: var(--surface-2); cursor: grab; user-select: none; }
 .rp-stage.grabbing { cursor: grabbing; }
 .rp-stage > svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.rp-phases > span { opacity: .75; }
 .rp-name { fill: var(--ink); font-weight: 800; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .rp-skill { fill: var(--accent-ink); font-weight: 800; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .rp-skill.speed { fill: var(--accent-2-ink); }
@@ -945,8 +949,7 @@ svg.luckchart .end.sim { fill: var(--accent-2-ink); }
 .rp-scrub { flex: 1; min-width: 0; }
 .rp-phases { position: relative; height: 14px; margin: 2px 8px 3px; border-radius: 4px; overflow: hidden; }
 .rp-phases > span { position: absolute; top: 0; bottom: 0; box-shadow: inset -1px 0 0 var(--surface); }
-.rp-phases i { position: absolute; inset: 0; }
-.rp-phases b { position: relative; display: block; padding-left: 5px; font-size: 10.5px; line-height: 14px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rp-phases b { position: relative; display: block; padding-left: 5px; font-size: 10.5px; line-height: 14px; color: #2a0c1e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rp-scrub input { width: 100%; margin: 0; accent-color: var(--accent); }
 .rp-ticks { position: relative; height: 14px; margin: 0 8px; font-size: 11px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
 .rp-ticks span { position: absolute; top: 0; transform: translateX(-50%); }

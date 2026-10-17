@@ -451,7 +451,7 @@ fn dense_frames_and_track() {
     let f = &b.out.frames[200];
     assert_eq!(horses_at(&b.out.frames, f.time), f.horses);
     let t = track(&race, &race.input);
-    assert_eq!((t.goal, t.ground), (1600.0, 2)); // Tokyo dirt 1600m
+    assert_eq!(t.goal, 1600.0); // Tokyo dirt 1600m
     assert!(t.width > 0.5 && t.metre > 0.5 && t.loop_span.is_some());
     // 100 m of lane 0 is ~100 m of world, the outer rail `width` lanes out.
     let (p, q) = (t.at(500.0, 0.0), t.at(600.0, 0.0));
