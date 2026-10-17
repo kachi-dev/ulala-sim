@@ -31,3 +31,7 @@ Shown in the app the first time a new version opens; the release workflow also p
 
 ## 0.2.4
 - Race replay viewer (wip)
+
+## 0.2.5
+- Race replay improvements
+- Slot optimizer (Change/add uma -> veterans/my umas -> optimize) - finds the uma within that slot with the highest WR
