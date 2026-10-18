@@ -29,29 +29,30 @@ pub(super) fn stamina_cards(h: &HorseStats, b: Option<&HorseStats>, cv: &CourseV
 pub(super) fn StaminaRun(i: usize) -> Element {
     let s = use_context::<S>();
     let running = use_busy(s);
-    let (Some(input), Some(race), Some(cv)) = (setup_for(s, i), s.race.cloned(), s.cview.cloned()) else { return rsx! {} };
+    let (Some((input, rivals)), Some(race), Some(cv)) = (setup_for(s, i), s.race.cloned(), s.cview.cloned()) else { return rsx! {} };
     // The baseline as it runs, and uma `i` in it (none when she was added since).
     let base = s.baseline.cloned().filter(|b| has_edits(Some(b), &s.input.peek())).and_then(|b| {
         let j = pairing(&b, &s.input.peek()).get(i).copied().flatten()?;
-        Some((Arc::new(setup::filled(s, &race, &b)), j))
+        let (b, r) = setup::filled(s, &race, &b).ok()?;
+        Some((Arc::new(b), r, j))
     });
     let n = *s.st_n.read();
     // Per seed: as is, at max stamina, each debuff muted, all muted; the baseline as is and at max stamina.
-    let n_debuffs = field_debuffs(&race, &input, i).len();
+    let n_debuffs = field_debuffs(&race, &input, i).iter().filter(|d| rivals.as_ref().is_none_or(|r| d.0 < r.from)).count();
     let runs = n * (2 + n_debuffs + (n_debuffs > 0) as usize) + if base.is_some() { 2 * n } else { 0 };
     let work = runs * input.horses.len();
     let total = if base.is_some() { 2 * n } else { n };
     let eta = eta(s, work);
     let start = move |_| {
-        let (race, input, base, cv) = (race.clone(), input.clone(), base.clone(), cv.clone());
+        let (race, input, rivals, base, cv) = (race.clone(), input.clone(), rivals.clone(), base.clone(), cv.clone());
         let seeds = seeds(input.random_seed, n);
         let rev = *s.rev.peek();
         let label = format!("Simulating {} races", thousands(runs));
         let field = Arc::new(input.horses.clone());
         let run = move |w: &Work| {
             // Same seeds for both, so they differ only by the edits.
-            let st = Arc::new(stamina(&race, &input, i, &seeds, true, w));
-            (st, base.as_ref().map(|(b, j)| Arc::new(stamina(&race, b, *j, &seeds, false, w))))
+            let st = Arc::new(stamina(&race, &input, rivals.as_ref(), i, &seeds, true, w));
+            (st, base.as_ref().map(|(b, r, j)| Arc::new(stamina(&race, b, r.as_ref(), *j, &seeds, false, w))))
         };
         measure(s, label, total, work, run, move |mut s, (st, base)| {
             s.st_dsel.set(None);

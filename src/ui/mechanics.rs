@@ -30,7 +30,7 @@ pub(super) fn mechanics_cards(h: &HorseStats, b: Option<&HorseStats>) -> Element
 pub(super) fn MechanicsRun(i: usize) -> Element {
     let s = use_context::<S>();
     let running = use_busy(s);
-    let Some(input) = setup_for(s, i) else { return rsx! {} };
+    let Some((input, rivals)) = setup_for(s, i) else { return rsx! {} };
     let pow = input.horses[i].pow;
     let n = *s.m_n.read();
     // Per seed: as set up, then each mechanic muted.
@@ -39,11 +39,11 @@ pub(super) fn MechanicsRun(i: usize) -> Element {
     let eta = eta(s, work);
     let start = move |_| {
         let Some(race) = s.race.cloned() else { return };
-        let input = input.clone();
+        let (input, rivals) = (input.clone(), rivals.clone());
         let seeds = seeds(input.random_seed, n);
         let rev = *s.rev.peek();
         let label = format!("Simulating {} races", thousands(runs));
-        let run = move |w: &Work| Arc::new(mechanics(&race, &input, i, &seeds, w));
+        let run = move |w: &Work| Arc::new(mechanics(&race, &input, rivals.as_ref(), i, &seeds, w));
         measure(s, label, n, work, run, move |mut s, rows| {
             s.m_sel.set(None);
             s.m_res.set(Some(MechRes { horse: i, rows, rev }));

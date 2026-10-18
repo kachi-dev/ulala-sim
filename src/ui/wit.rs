@@ -96,7 +96,7 @@ pub(super) fn wit_cards(h: &HorseStats, b: Option<&HorseStats>, diff: Option<&Ba
 pub(super) fn WitRun(i: usize) -> Element {
     let s = use_context::<S>();
     let running = use_busy(s);
-    let Some(input) = setup_for(s, i) else { return rsx! {} };
+    let Some((input, rivals)) = setup_for(s, i) else { return rsx! {} };
     let Some(old) = old_wit(s, i) else { return rsx! {} };
     let new = input.horses[i].wiz;
     let n = *s.w_n.read();
@@ -106,11 +106,11 @@ pub(super) fn WitRun(i: usize) -> Element {
     let eta = eta(s, work);
     let start = move |_| {
         let Some(race) = s.race.cloned() else { return };
-        let input = input.clone();
+        let (input, rivals) = (input.clone(), rivals.clone());
         let seeds = seeds(input.random_seed, n);
         let rev = *s.rev.peek();
         let label = format!("Simulating {} races", thousands(runs));
-        let run = move |w: &Work| Arc::new(wit(&race, &input, i, old, &seeds, w));
+        let run = move |w: &Work| Arc::new(wit(&race, &input, rivals.as_ref(), i, old, &seeds, w));
         measure(s, label, n, work, run, move |mut s, wit| {
             s.w_sel.set(None);
             s.w_res.set(Some(WitRes { horse: i, old, new, wit, rev }));

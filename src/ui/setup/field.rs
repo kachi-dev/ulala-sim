@@ -137,7 +137,18 @@ pub(super) fn FieldCard() -> Element {
     let compact = *s.compact.read();
     let sel = (*s.sel.read()).min(n.saturating_sub(1));
     let player = player_now(&race, &input);
-    let cols = uma_colors(&input, player);
+    // Team colours as the race runs: with rivals in the empty gates the field has their teams too (each its own, after
+    // the umas'), so the umas' teams get their hues even when they are all one team.
+    let teams_in = {
+        let (npcs, size) = (s.npcs.read(), *s.field_size.read());
+        let mut v = input.clone();
+        if npcs.fill && npcs.rivals.on && size > n {
+            let base = input.horses.iter().map(|h| h.team_id).max().unwrap_or(0) + 1;
+            v.horses.extend((0..(size - n).div_ceil(TEAM_SIZE) as i32).map(|k| HorseInput { team_id: base + k, ..Default::default() }));
+        }
+        v
+    };
+    let cols = uma_colors(&teams_in, player);
     let rows = input.horses.iter().enumerate().map(|(i, h)| {
         let b = base.as_deref().zip(pairs.get(i).copied().flatten()).map(|(b, j)| &b.horses[j]);
         let (hs, bs) = (stats(h), stats(b.unwrap_or(h)));
@@ -195,7 +206,7 @@ pub(super) fn FieldCard() -> Element {
                         // Team tags on the second line: next to a long name they'd be cut by the ellipsis.
                         // Tags never truncate; the costume gives way first, then the trainer.
                         div { class: "muted small row2 fit", title: "{sub}",
-                            {team_pick(s, &input, player, i)}
+                            {team_pick(s, &teams_in, player, i)}
                             span { class: "costume", "{title}" }
                             if !trainer.is_empty() { span { class: "trainer", "{trainer}" } }
                         }
@@ -225,7 +236,7 @@ pub(super) fn FieldCard() -> Element {
                         {horse_icon(h, Some(&cols[i]), "lg")}
                         div { class: "uma-name",
                             b { "{chara_name(h.chara_id)}" }
-                            {team_pick(s, &input, player, i)}
+                            {team_pick(s, &teams_in, player, i)}
                             div { class: "muted small", "{title}" }
                             div { class: "muted small", if trainer.is_empty() { "Gate {i + 1}" } else { "Gate {i + 1} · {trainer}" } }
                         }
@@ -245,13 +256,13 @@ pub(super) fn FieldCard() -> Element {
     let is_save = race.path.is_some();
     let mut fs = s.field_size;
     let cap = *fs.read();
-    let npc_fill = s.npcs.read().fill;
+    let (npc_fill, rivals) = { let n = s.npcs.read(); (n.fill, n.rivals.on) };
     rsx! {
         details { class: "card fold", open: true,
             summary { class: "card-h",
                 h3 { "Field" }
                 span { class: "muted fsize",
-                    if npc_fill && cap > n { "{n} umas + {cap - n} NPCs" } else { "{n} umas" }
+                    if npc_fill && cap > n { "{n} umas + {cap - n} " if rivals { "rivals" } else { "NPCs" } } else { "{n} umas" }
                     span { class: "small", "{FIELD_MIN}" }
                     div { class: "fs-slider", style: "--f: {(cap - FIELD_MIN) as f32 / (MAX_FIELD - FIELD_MIN) as f32}",
                         div { class: "fs-ticks",

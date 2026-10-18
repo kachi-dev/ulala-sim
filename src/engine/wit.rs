@@ -1,6 +1,6 @@
 use uma_race_sim::api::{RaceInput, WizAlt, mechanic, span_kind, wiz_mechanic};
 
-use super::{HorseRun, Race, SkillOutcome, Work, gap_lengths, par_map, run_drawn};
+use super::{HorseRun, Race, Rivals, SkillOutcome, Work, at_seed, gap_lengths, par_map, run_drawn};
 
 /// `wiz_mechanic` bits in order, as the Wit tab names them.
 pub const WIT_MECHANICS: [&str; wiz_mechanic::COUNT] = ["Section rolls", "Position keep", "Spurt candidates", "Skills", "Rushed", "Downhill", "Course bonus"];
@@ -62,12 +62,12 @@ fn sample(h: &HorseRun) -> WitSample {
 /// Horse `i` of `input` on `seeds` at its baseline Wit `old_wiz`, against the same with each Wit mechanic alone (then all)
 /// on its Wit as set up: a pair differs only in what that mechanic does with the Wit change (plus the knock-on once the
 /// races diverge).
-pub fn wit(race: &Race, input: &RaceInput, i: usize, old_wiz: i32, seeds: &[i32], w: &Work) -> Wit {
+pub fn wit(race: &Race, input: &RaceInput, rivals: Option<&Rivals>, i: usize, old_wiz: i32, seeds: &[i32], w: &Work) -> Wit {
     let new_wiz = input.horses[i].wiz;
     let masks: Vec<u8> = (0..wiz_mechanic::COUNT).map(|k| 1 << k).chain([wiz_mechanic::ALL]).collect();
     let res = par_map(seeds.len(), w, |s| {
         let run = |mechanics: u8| {
-            let mut inp = RaceInput { random_seed: seeds[s], ..input.clone() };
+            let mut inp = at_seed(input, seeds[s], rivals);
             inp.horses[i].viewer_id = 1; // dense frames near the goal (recording only), for `gap_lengths`
             inp.horses[i].wiz = old_wiz;
             if mechanics != 0 {
@@ -93,10 +93,10 @@ pub const MECHANICS: [&str; mechanic::COUNT] = ["Power conserve"];
 
 /// Horse `i` of `input` on `seeds` as set up, against the same with each `mechanic` muted: `rows[k]` is bit `1 << k`'s
 /// pair per seed (new = as set up, old = muted, so + = what the mechanic gained).
-pub fn mechanics(race: &Race, input: &RaceInput, i: usize, seeds: &[i32], w: &Work) -> Vec<Vec<WitPair>> {
+pub fn mechanics(race: &Race, input: &RaceInput, rivals: Option<&Rivals>, i: usize, seeds: &[i32], w: &Work) -> Vec<Vec<WitPair>> {
     let res = par_map(seeds.len(), w, |s| {
         let run = |muted: u8| {
-            let mut inp = RaceInput { random_seed: seeds[s], ..input.clone() };
+            let mut inp = at_seed(input, seeds[s], rivals);
             inp.horses[i].viewer_id = 1; // dense frames near the goal (recording only), for `gap_lengths`
             inp.horses[i].muted_mechanics = muted;
             run_drawn(race, &inp)

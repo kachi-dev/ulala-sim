@@ -23,11 +23,11 @@ const ACCURACY_N: usize = 2000;
 /// in the same field and swaps it in.
 fn improve_accuracy(s: S, id: i32) {
     let (Some(race), Some(r)) = (s.race.cloned(), s.g_res.cloned()) else { return };
-    let (mut input, i) = npc_field(&race, &s.input.peek(), r.horse, false, &r.npcs, r.size);
+    let (mut input, i) = ((*r.field).clone(), r.horse);
     input.random_seed = random_seed();
     let work = ACCURACY_N * 2 * input.horses.len();
     let label = format!("Measuring {} × {} seeds", skill_info(id).name, thousands(ACCURACY_N));
-    let run = move |w: &Work| skill_gains(&race, &input, i, &[id], r.blank, ACCURACY_N, w).0;
+    let run = move |w: &Work| skill_gains(&race, &input, r.rivals.as_ref(), i, &[id], r.blank, ACCURACY_N, w).0;
     measure(s, label, ACCURACY_N, work, run, move |mut s, mut fresh| {
         // Cancelled (no full sample set), or a new measurement replaced this one meanwhile: keep what's there.
         let Some(g) = fresh.pop() else { return };
@@ -98,21 +98,23 @@ pub fn GainsTab() -> Element {
     let size = run_size(s, field_n);
     let n_c = cands.len();
     let races = n_c * n * 2;
-    let work = races * size.unwrap_or(field_n);
+    let work = races * size.clone().unwrap_or(field_n);
     let eta = eta(s, work);
     let start = move |_| {
         let (Some(race), Some(cv)) = (s.race.cloned(), s.cview.cloned()) else { return };
-        let Some(size) = size.filter(|_| !cands.is_empty()) else { return };
-        let npcs = s.npcs.cloned();
-        let (input, i) = npc_field(&race, &s.input.peek(), hi, false, &npcs, size);
+        if cands.is_empty() {
+            return;
+        }
+        let Ok((input, rivals)) = setup::filled(s, &race, &s.input.peek()) else { return };
+        let (i, measured, res_rivals) = (hi, Arc::new(input.clone()), rivals.clone());
         let (cands, rev, field) = (cands.clone(), *s.rev.peek(), input.horses.clone());
         let (card, chara, asked) = (horse.card_id, horse.chara_id, cands.len());
         let label = format!("Measuring {} skills × {n} seeds", thousands(asked));
-        let run = move |w: &Work| skill_gains(&race, &input, i, &cands, blank, n, w);
+        let run = move |w: &Work| skill_gains(&race, &input, rivals.as_ref(), i, &cands, blank, n, w);
         measure(s, label, asked * n, work, run, move |mut s, (items, spurt)| {
             s.g_sel.set(None);
             let low_spurt = low_spurts(&field, &spurt);
-            s.g_res.set(Some(GainsRes { horse: hi, card, chara, items: Arc::new(items), cv, n, asked, blank, npcs, size, low_spurt, rev }));
+            s.g_res.set(Some(GainsRes { horse: hi, card, chara, items: Arc::new(items), cv, n, asked, blank, field: measured, rivals: res_rivals, low_spurt, rev }));
             reveal("gains");
         });
     };
@@ -169,9 +171,9 @@ pub fn GainsTab() -> Element {
                 }
             }
             div { class: "runbar",
-                button { class: "btn big", disabled: running() || n_c == 0 || size.is_none(), onclick: start, "Measure {thousands(n_c)} skills" }
-                if size.is_none() {
-                    span { class: "warn", "{EMPTY_SLOTS}" }
+                button { class: "btn big", disabled: running() || n_c == 0 || size.is_err(), onclick: start, "Measure {thousands(n_c)} skills" }
+                if let Err(e) = &size {
+                    span { class: "warn", "{e}" }
                 } else {
                     span { class: "muted",
                         "{thousands(n_c)} skills match"

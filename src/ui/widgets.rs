@@ -379,15 +379,46 @@ pub(super) fn who_sel(s: S) -> Element {
     }
 }
 
-/// The size of the setup's field with `umas` umas as Skill gains and Uma ranking run it: NPCs fill the empty gates
-/// when the setup says so. None when gates would stay empty.
-pub(super) fn run_size(s: S, umas: usize) -> Option<usize> {
+/// The size of the setup's field with `umas` umas as it runs: NPCs or rivals fill the empty gates when the setup says
+/// so. Err: why it can't run (gates would stay empty, or the rival pool can't fill them).
+pub(super) fn run_size(s: S, umas: usize) -> Result<usize, String> {
     let want = *s.field_size.read();
-    (s.npcs.read().fill || umas >= want).then(|| umas.max(want))
+    let npcs = s.npcs.read();
+    if umas >= want {
+        return Ok(umas);
+    }
+    if !npcs.fill {
+        return Err(EMPTY_SLOTS.into());
+    }
+    match npcs.rivals.on.then(|| rivals_short(s, want - umas)).flatten() {
+        Some(e) => Err(e),
+        None => Ok(want),
+    }
 }
 
-/// Why a measurement can't run with `run_size` None.
+/// Why a measurement can't run with gates left empty.
 pub(super) const EMPTY_SLOTS: &str = "Cannot sim with empty slots - either add umas or enable NPC umas";
+
+/// The rival pool as set up, without the teams left out.
+pub(super) fn rival_teams(s: S) -> Vec<PoolTeam> {
+    let setup = s.npcs.read().rivals.clone();
+    let mut v = rival_pool(&s.saves.read(), &s.meta.read(), &setup).0;
+    v.retain(|t| !setup.dropped.contains(&t.key));
+    v
+}
+
+/// Why the rival pool can't fill `slots` empty gates; None when it can.
+pub(super) fn rivals_short(s: S, slots: usize) -> Option<String> {
+    let singles = s.npcs.read().rivals.singles;
+    let pool = rival_teams(s);
+    let sizes: Vec<usize> = pool_units(&pool, singles).iter().map(|u| u.1.len()).collect();
+    let have = pool_umas(&pool, singles);
+    (!pool_fills(&sizes, slots)).then(|| match have {
+        0 => "No rivals: pick replays in Rival pool".to_string(),
+        _ if have >= slots => format!("Rival pool has too few teams for {slots} empty slots: add replays or lower the field size"),
+        _ => format!("Rival pool has {have} umas for {slots} empty slots: add replays or lower the field size"),
+    })
+}
 
 /// NPC `j` (`lobby_styles` order) and its `LOBBY_STYLES` index, for the first `n` of `npcs`.
 pub(super) fn npc_slots(npcs: &NpcSetup, n: usize) -> impl Iterator<Item = (i32, usize)> {

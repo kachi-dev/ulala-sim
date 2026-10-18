@@ -10,8 +10,9 @@ mod run;
 use super::*;
 use crate::charts::{Band, Bins, CourseProfile, Region, SkillMark};
 use course::CourseCard;
+pub(super) use course::{cond_names, cond_seg, conds_of, course_pickers};
 pub use drawer::{Drawer, Picker};
-pub(super) use drawer::Cand;
+pub(super) use drawer::{Cand, vc_body};
 pub use npcs::NpcDrawer;
 use field::FieldCard;
 use run::RunBar;
@@ -106,7 +107,7 @@ fn median_run(s: S) -> Option<MedianRun> {
     order.sort_by(|&a, &b| times[a].total_cmp(&times[b]));
     let k = *order.get(order.len() / 2)?;
     let seed = cur.seeds[k];
-    let run = Arc::new(run_drawn(&race, &RaceInput { random_seed: seed, ..(*res.input).clone() }));
+    let run = Arc::new(run_drawn(&race, &at_seed(&res.input, seed, res.rivals.as_ref())));
     Some(MedianRun { run, horse, seed, seeds: cur.seeds.len(), time: times[k], place: cur.horses[horse].places[k] })
 }
 

@@ -58,17 +58,20 @@ pub fn RankingTab() -> Element {
     let size = run_size(s, field_n);
     let n = *s.r_n.read();
     let combos = picked.len() * styles.len();
-    let work = combos * n * 2 * size.unwrap_or(0);
+    let work = combos * n * 2 * size.clone().unwrap_or(0);
     let eta = eta(s, work);
     let n_picked = picked.len();
     let styles_on = styles.clone();
     let start = move |_| {
         let (Some(race), Some(cv)) = (s.race.cloned(), s.cview.cloned()) else { return };
-        let Some(size) = size.filter(|_| combos > 0) else { return };
-        let (input, i) = npc_field(&race, &s.input.peek(), hi, false, &s.npcs.peek(), size);
+        if combos == 0 {
+            return;
+        }
+        let Ok((input, rivals)) = setup::filled(s, &race, &s.input.peek()) else { return };
+        let i = hi;
         let (cards, styles, rev, field) = (picked.clone(), styles.clone(), *s.rev.peek(), input.horses.clone());
         let label = format!("Ranking {} umas × {} styles × {n} seeds", cards.len(), styles.len());
-        let run = move |w: &Work| uma_ranking(&race, &input, i, &cards, &styles, n, w);
+        let run = move |w: &Work| uma_ranking(&race, &input, rivals.as_ref(), i, &cards, &styles, n, w);
         measure(s, label, combos * n, work, run, move |mut s, (items, spurt)| {
             s.r_sel.set(None);
             let low_spurt = low_spurts(&field, &spurt);
@@ -112,9 +115,9 @@ pub fn RankingTab() -> Element {
                 }
             }
             div { class: "runbar",
-                button { class: "btn big", disabled: running() || combos == 0 || size.is_none(), onclick: start, "Measure {thousands(combos)} combinations" }
-                if size.is_none() {
-                    span { class: "warn", "{EMPTY_SLOTS}" }
+                button { class: "btn big", disabled: running() || combos == 0 || size.is_err(), onclick: start, "Measure {thousands(combos)} combinations" }
+                if let Err(e) = &size {
+                    span { class: "warn", "{e}" }
                 } else {
                     span { class: "muted", "{thousands(n_picked)} costumes × {styles_on.len()} styles · {thousands(combos * n * 2)} races, {eta}" }
                 }

@@ -37,13 +37,144 @@ fn team_wr(res: &Res, cur: &Batch, base: Option<&Arc<Batch>>) -> Element {
     }
 }
 
+/// With rivals: races the umas won and the rivals won, and the pool (`rival_stats`).
+fn rival_kpis(r: &Rivals, cur: &Batch, st: &[RivalStat]) -> Element {
+    let races = cur.seeds.len();
+    let won = (0..races).filter(|&k| (0..r.from).any(|h| cur.horses[h].places.get(k) == Some(&1))).count();
+    let drawn: usize = st.iter().map(|x| x.drawn).sum();
+    let singles = r.pool.iter().all(|t| t.horses.len() == 1);
+    let what = if singles { "umas" } else { "teams" };
+    let per = drawn as f32 / races.max(1) as f32;
+    let each = drawn as f32 / r.pool.len().max(1) as f32;
+    rsx! {
+        div { class: "kpis",
+            div {
+                span { "Your umas" }
+                b { "{won} of {races}" }
+                div { class: "cap", "{pct(won as f32 / races.max(1) as f32)} win rate" }
+            }
+            div {
+                span { "Rivals" }
+                b { "{races - won} of {races}" }
+                div { class: "cap", "races won by a rival" }
+            }
+            div {
+                span { "Rival pool" }
+                b { "{r.pool.len()} {what}" }
+                div { class: "cap", if each < 10.0 { "{per:.0} per race, each in about {each:.1} races" } else { "{per:.0} per race, each in about {each:.0} races" } }
+            }
+        }
+    }
+}
+
+/// With rivals: each drawn team's record, most wins first, in a scroll box; clicking one opens its umas' cards under
+/// it (`s.rival_open`).
+fn rival_table(s: S, r: &Rivals, st: &[RivalStat]) -> Element {
+    const SHOWN: usize = 200;
+    let singles = r.pool.iter().all(|t| t.horses.len() == 1);
+    let mut open = s.rival_open;
+    let opened = *open.read();
+    let cols = if singles { 5 } else { 6 };
+    rsx! {
+        section { class: "card",
+            div { class: "card-h",
+                h3 { if singles { "Rival umas" } else { "Rival teams" } }
+                span { class: "muted", "{st.len()} drawn · most wins first" }
+            }
+            div { class: "rv-scroll",
+                table { class: "grid results rv-res",
+                    thead {
+                        tr {
+                            th { if singles { "Uma" } else { "Team" } }
+                            th { class: "num", "Races drawn" }
+                            th { class: "num", "Win rate" span { class: "sub", "of the races drawn" } }
+                            th { class: "num", "Ahead of you" span { class: "sub", "best place beat yours" } }
+                            if !singles { th { "Top uma" span { class: "sub", "most wins in the team" } } }
+                            th { "From" }
+                        }
+                    }
+                    tbody {
+                        for x in st.iter().take(SHOWN) {
+                            {
+                                let t = &r.pool[x.team];
+                                let d = x.drawn.max(1) as f32;
+                                let top = (0..t.horses.len()).max_by_key(|&m| x.uma_wins[m]).filter(|&m| x.uma_wins[m] > 0);
+                                let team = x.team;
+                                rsx! {
+                                    tr {
+                                        key: "{x.team}",
+                                        class: if opened == Some(team) { "sel" },
+                                        onclick: move |_| open.set(if opened == Some(team) { None } else { Some(team) }),
+                                        td { class: "who",
+                                            div { class: "whobox",
+                                                span { class: "mobs", for h in &t.horses { {horse_icon(h, None, "sm")} } }
+                                                div {
+                                                    b { "{t.trainer}" }
+                                                    if singles { div { class: "muted small", "{horse_name(&t.horses[0])}" } }
+                                                }
+                                            }
+                                        }
+                                        td { class: "num", "{x.drawn}" }
+                                        td { class: "num", b { "{pct(x.wins as f32 / d)}" } div { class: "small muted", "{x.wins} wins" } }
+                                        td { class: "num", b { "{pct(x.ahead as f32 / d)}" } div { class: "small muted", "{x.ahead} of {x.drawn}" } }
+                                        if !singles {
+                                            td { class: "who",
+                                                if let Some(m) = top {
+                                                    div { class: "whobox",
+                                                        {horse_icon(&t.horses[m], None, "sm")}
+                                                        div {
+                                                            b { "{horse_name(&t.horses[m])}" }
+                                                            div { class: "muted small", "won {x.uma_wins[m]} of {x.drawn}" }
+                                                        }
+                                                    }
+                                                } else {
+                                                    span { class: "muted", "-" }
+                                                }
+                                            }
+                                        }
+                                        td { class: "muted small", "{t.category} · {t.seen} replay" if t.seen != 1 { "s" } }
+                                    }
+                                    if opened == Some(team) {
+                                        tr { key: "{x.team}-cards", class: "expand",
+                                            td { colspan: "{cols}",
+                                                div { class: "rv-cards",
+                                                    for h in &t.horses {
+                                                        div { class: "rv-card",
+                                                            div { class: "vc-h",
+                                                                {horse_icon(h, None, "md")}
+                                                                div { class: "vc-name",
+                                                                    b { class: "ell", "{horse_name(h)}" }
+                                                                    div { class: "muted small ell", "{card_title(h.card_id)}" }
+                                                                    div { class: "muted small", "{t.trainer}" }
+                                                                }
+                                                            }
+                                                            {setup::vc_body(h, &[])}
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if st.len() > SHOWN { p { class: "muted small", "Showing {SHOWN} of {st.len()}" } }
+        }
+    }
+}
+
 pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, base: Option<&Arc<Batch>>) -> Element {
     let mut focus = s.focus;
     let f = *focus.read();
     let diffs = base.map(|b| diff_batches(b, cur, &res.pairs));
     let n = cur.horses.len();
     let ed = &res.ed_mask;
-    let mut order: Vec<usize> = (0..n).collect();
+    // With rivals the gates after the umas hold a different uma every race: they get their own table.
+    let rivals = res.rivals.as_ref().map(|r| (r, rival_stats(r, cur)));
+    let mut order: Vec<usize> = (0..rivals.as_ref().map_or(n, |r| r.0.from)).collect();
     order.sort_by(|&a, &b| cur.horses[a].place.mean.total_cmp(&cur.horses[b].place.mean));
     let improved = diffs.as_ref().is_some_and(|d| d.iter().zip(ed).any(|(d, &m)| m && d.as_ref().is_some_and(|d| d.win_rate.1 > d.win_rate.0 + 0.005)));
     rsx! {
@@ -53,7 +184,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                 span { class: "muted", "click an uma for details" }
                 if improved { img { class: "great", src: "/a/great.webp", alt: "Great!" } }
             }
-            {team_wr(res, cur, base)}
+            if let Some((r, st)) = &rivals { {rival_kpis(r, cur, st)} } else { {team_wr(res, cur, base)} }
             div { class: "scroll-x",
                 table { class: "grid results batch",
                     thead {
@@ -136,6 +267,7 @@ pub(super) fn batch_view(s: S, res: &Res, names: &[String], cur: &Arc<Batch>, ba
                 }
             }
         }
+        if let Some((r, st)) = &rivals { {rival_table(s, r, st)} }
         if let Some(i) = f.filter(|&i| i < n) {
             {horse_detail(s, res, i, cur, base, diffs.as_ref().and_then(|d| d[i].as_ref()))}
         }

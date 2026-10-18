@@ -20,33 +20,38 @@ fn set_rows(ids: &[i32], none: &str) -> Element {
     }
 }
 
-/// The Field card's NPC block: "Fill slots with NPC umas", and when on, the `n` NPCs per style with their skills, the
-/// skills on all of them and their stats.
+/// The Field card's block for the `n` empty slots: left empty, NPCs (per style with their skills, the skills on all of
+/// them and their stats), or rivals from replays (`rival_block`).
 pub(super) fn npc_block(mut s: S, n: usize) -> Element {
     let npcs = s.npcs.cloned();
     let c = lobby_counts(npcs.counts, n);
     let stats = npcs.stats.map(|v| v.to_string()).join(" / ");
+    let mode = if !npcs.fill { 0 } else if npcs.rivals.on { 2 } else { 1 };
     rsx! {
-        div { class: if npcs.fill { "npcs" } else { "npcs off" },
+        div { class: if mode > 0 { "npcs" } else { "npcs off" },
             div { class: "npcs-h",
-                label { class: "check",
-                    input {
-                        r#type: "checkbox",
-                        checked: npcs.fill,
-                        onchange: move |_| {
-                            let on = s.npcs.peek().fill;
-                            s.npcs.write().fill = !on;
-                        },
+                b { class: "small", "Empty slots" }
+                div { class: "seg small",
+                    for (m, label) in ["Off", "NPCs", "Replay rivals"].into_iter().enumerate() {
+                        button { class: if mode == m { "on" }, onclick: move |_| {
+                                let mut w = s.npcs.write();
+                                w.fill = m > 0;
+                                w.rivals.on = m == 2;
+                            },
+                            "{label}"
+                        }
                     }
-                    "Fill slots with NPC umas"
                 }
                 div { class: "grow" }
-                if npcs.fill {
-                    span { class: "muted small", "{n} NPCs" }
+                span { class: "muted small", "{n} slot" if n != 1 { "s" } }
+                if mode == 1 {
                     button { class: "btn alt", onclick: move |_| s.npc_open.set(true), "NPC setup" }
                 }
             }
-            if npcs.fill && n > 0 {
+            if mode == 2 {
+                {crate::ui::rivals::rival_block(s, n)}
+            }
+            if mode == 1 && n > 0 {
                 div { class: "npcsum",
                     span { class: "hd", "Style" }
                     span { class: "hd", "NPCs" }
@@ -198,10 +203,10 @@ pub fn NpcDrawer() -> Element {
             div { class: "drawer-f",
                 button {
                     class: "btn ghost",
-                    disabled: npcs == NpcSetup { fill: npcs.fill, ..Default::default() },
+                    disabled: npcs == NpcSetup { fill: npcs.fill, rivals: npcs.rivals.clone(), ..Default::default() },
                     onclick: move |_| {
-                        let fill = s.npcs.peek().fill;
-                        s.npcs.set(NpcSetup { fill, ..Default::default() });
+                        let (fill, rivals) = (s.npcs.peek().fill, s.npcs.peek().rivals.clone());
+                        s.npcs.set(NpcSetup { fill, rivals, ..Default::default() });
                     },
                     "Reset NPCs"
                 }

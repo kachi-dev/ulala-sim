@@ -56,7 +56,7 @@ fn custom_race() {
 
     let w = Work::default();
     let cands = [200331, 100521, 201352]; // Professor of Curvature, Urara's unique (owned), Hydrate
-    let g = skill_gains(&race, &new_race().input, 0, &cands, false, 8, &w).0;
+    let g = skill_gains(&race, &new_race().input, None, 0, &cands, false, 8, &w).0;
     assert_eq!(w.done.load(Relaxed), 24);
     // Muted baseline: a skill that never activates changes nothing.
     assert!(g.iter().filter(|x| x.rate == 0.0).all(|x| x.samples.iter().all(|&v| v == 0.0)));
@@ -67,7 +67,7 @@ fn custom_race() {
     let swaps = |owned: &[i32], cands: &[i32]| {
         let mut inp = new_race().input;
         inp.horses[0].skills = owned.iter().map(|&skill_id| SkillInput { skill_id, level: 1 }).collect();
-        let g = skill_gains(&race, &inp, 0, cands, false, 2, &w).0;
+        let g = skill_gains(&race, &inp, None, 0, cands, false, 2, &w).0;
         let get = |id| g.iter().find(|x| x.skill_id == id).unwrap();
         cands.iter().map(|&id| get(id).replaces.map(|old| (old, get(id).upgrade))).collect::<Vec<_>>()
     };
@@ -82,7 +82,7 @@ fn custom_race() {
     // Left-Handed × owned: ○ is the upgrade.
     assert_eq!(swaps(&[200023], &[200022]), [Some((200023, true))]);
     w.cancel.store(true, Relaxed);
-    assert!(skill_gains(&race, &race.input, 0, &cands, false, 8, &w).0.is_empty());
+    assert!(skill_gains(&race, &race.input, None, 0, &cands, false, 8, &w).0.is_empty());
 
     // NPC lobby: the measured uma at gate 5 among 8 mob NPCs (no chara, costume or unique); the front-heavy end has 3
     // Runaways, which only have the Runaway skill.
@@ -249,7 +249,7 @@ fn stamina_debuffs() {
     assert!(field_debuffs(&race, &team, 0).is_empty());
     team.horses[1].team_id = 2;
     assert_eq!(field_debuffs(&race, &team, 0), vec![(1, 200891)]);
-    let st = stamina(&race, &input, 0, &seeds(1, 8), true, &Work::default());
+    let st = stamina(&race, &input, None, 0, &seeds(1, 8), true, &Work::default());
     assert_eq!((st.loss.len(), st.stats.times.len(), st.debuffs.len()), (8, 8, 1));
     let d = &st.debuffs[0];
     assert_eq!((d.owner, d.skill_id), (1, 200891));
@@ -259,7 +259,7 @@ fn stamina_debuffs() {
     // Low stamina on the longest course: it costs lengths, and max stamina spurts more often.
     set_course(&race, &mut input, cs_long(&race));
     input.horses[0].stamina = 400;
-    let st = stamina(&race, &input, 0, &seeds(1, 8), true, &Work::default());
+    let st = stamina(&race, &input, None, 0, &seeds(1, 8), true, &Work::default());
     // Per seed it's noisy (the runs diverge, and with them later RNG draws); on average it costs.
     assert!(st.loss.iter().map(|x| x.0).sum::<f32>() < -0.5 && st.full_at_max > st.stats.full_spurt_rate);
 }
@@ -271,11 +271,11 @@ fn wit_mechanics() {
     input.horses = vec![new_horse(&race, 105201), new_horse(&race, cards()[0].card_id)];
     input.horses[0].wiz = 1200;
     // The same Wit as the old one: nothing changes.
-    let w = wit(&race, &input, 0, 1200, &seeds(1, 4), &Work::default());
+    let w = wit(&race, &input, None, 0, 1200, &seeds(1, 4), &Work::default());
     assert_eq!(w.rows.len(), WIT_MECHANICS.len());
     assert!(w.rows.iter().chain([&w.all]).all(|r| r.len() == 4) && w.rows.iter().flatten().chain(&w.all).all(|p| p.gain == 0.0 && p.new == p.old));
     // 1200 vs 200: the section rolls move every race, and all at once costs the old Wit lengths on average.
-    let w = wit(&race, &input, 0, 200, &seeds(1, 16), &Work::default());
+    let w = wit(&race, &input, None, 0, 200, &seeds(1, 16), &Work::default());
     let sections = uma_race_sim::api::wiz_mechanic::SECTIONS.trailing_zeros() as usize;
     assert!(w.rows[sections].iter().all(|p| p.gain != 0.0));
     assert!(w.all.iter().map(|p| p.gain).sum::<f32>() > 0.0);
@@ -290,12 +290,12 @@ fn other_mechanics() {
     input.horses = vec![new_horse(&race, 105201), new_horse(&race, cards()[0].card_id)];
     // Power 1000: nothing to conserve, so muting it changes nothing.
     input.horses[0].pow = 1000;
-    let m = mechanics(&race, &input, 0, &seeds(1, 4), &Work::default());
+    let m = mechanics(&race, &input, None, 0, &seeds(1, 4), &Work::default());
     assert_eq!(m.len(), MECHANICS.len());
     assert!(m.iter().flatten().all(|p| p.gain == 0.0 && p.new == p.old));
     // Power 1600: the boost is released (never when muted), and it gains lengths on average.
     input.horses[0].pow = 1600;
-    let m = mechanics(&race, &input, 0, &seeds(1, 16), &Work::default());
+    let m = mechanics(&race, &input, None, 0, &seeds(1, 16), &Work::default());
     assert!(m[0].iter().any(|p| p.new.conserve > 0.0) && m[0].iter().all(|p| p.old.conserve == 0.0));
     assert!(m[0].iter().map(|p| p.gain).sum::<f32>() > 0.0);
 }
@@ -318,7 +318,7 @@ fn gains_fingerprint() {
         let cands = can_activate(&race, &input, i, ids);
         let w = Work::default();
         let t = std::time::Instant::now();
-        let mut g = skill_gains(&race, &input, i, &cands, false, 16, &w).0;
+        let mut g = skill_gains(&race, &input, None, i, &cands, false, 16, &w).0;
         println!("course {course}: {} skills in {:.1?}", g.len(), t.elapsed());
         g.sort_by_key(|x| x.skill_id);
         for x in g {
@@ -358,7 +358,7 @@ fn shared_run_fingerprint() {
         owned.horses[i].skills.extend(able.iter().step_by(able.len() / 10).take(10).map(|&skill_id| SkillInput { skill_id, level: 1 }));
         let cur: Vec<i32> = owned.horses[i].skills.iter().map(|s| s.skill_id).collect();
         for blank in [false, true] {
-            time(format!("course {course} gains owned={} blank={blank}", cur.len()), &mut || format!("{:?}", skill_gains(&race, &owned, i, &cur, blank, 64, &Work::default())));
+            time(format!("course {course} gains owned={} blank={blank}", cur.len()), &mut || format!("{:?}", skill_gains(&race, &owned, None, i, &cur, blank, 64, &Work::default())));
         }
         // Owned, unowned and an upgrade (Corner Adept ◎ while owning ○) together.
         let mut mixed = owned.clone();
@@ -366,7 +366,7 @@ fn shared_run_fingerprint() {
             mixed.horses[i].skills.push(SkillInput { skill_id: 200332, level: 1 });
         }
         let cands: Vec<i32> = cur.iter().copied().take(4).chain([200331, 201352]).collect();
-        time(format!("course {course} gains mixed"), &mut || format!("{:?}", skill_gains(&race, &mixed, i, &cands, false, 16, &Work::default())));
+        time(format!("course {course} gains mixed"), &mut || format!("{:?}", skill_gains(&race, &mixed, None, i, &cands, false, 16, &Work::default())));
         for k in [4, drains.len()] {
             let mut f = field.clone();
             let npcs: Vec<usize> = (0..f.horses.len()).filter(|&h| h != i).collect();
@@ -374,13 +374,13 @@ fn shared_run_fingerprint() {
                 f.horses[npcs[j % npcs.len()]].skills.push(SkillInput { skill_id: id, level: 1 });
             }
             time(format!("course {course} stamina debuffs={k}"), &mut || {
-                let st = stamina(&race, &f, i, &seeds(7, 128), true, &Work::default());
+                let st = stamina(&race, &f, None, i, &seeds(7, 128), true, &Work::default());
                 let hits: Vec<String> = st.debuffs.iter().map(|d| format!("{}:{:.2}", d.skill_id, d.hit_rate)).collect();
                 println!("  hit rates {}", hits.join(" "));
                 format!("{st:?}")
             });
         }
-        time(format!("course {course} stamina no debuffs"), &mut || format!("{:?}", stamina(&race, &field, i, &seeds(7, 128), false, &Work::default())));
+        time(format!("course {course} stamina no debuffs"), &mut || format!("{:?}", stamina(&race, &field, None, i, &seeds(7, 128), false, &Work::default())));
     }
     std::fs::write(std::env::var("OPT_FP").expect("OPT_FP"), out).unwrap();
 }
@@ -430,7 +430,7 @@ fn gate_skill_outcomes() {
     let (mut f, i) = npc_field(&race, &race.input, 0, true, &NpcSetup::default(), FIELD_MIN);
     f.horses[i].wiz = 300;
     f.horses[i].skills.push(SkillInput { skill_id: 201562, level: 1 }); // random_lot==50&post_number==7
-    let b = run_batch(&race, &f, &seeds(1, 200), true, &Work::default());
+    let b = run_batch(&race, &f, None, &seeds(1, 200), true, &Work::default());
     let o = b.horses[i].skills.iter().find(|k| k.skill_id == 201562).unwrap().outcomes;
     let (wit, cant) = (o[OutcomeKind::WitCheck as usize], o[OutcomeKind::CantHere as usize]);
     assert!(wit > 0.1 && cant > 0.4, "{o:?}");

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uma_race_sim::api::{HorseInput, RaceInput, SkillInput};
 
-use super::{Dist, GRADE_A, MAX_STAMINA, Race, Run, STYLES, Work, ability_type, course_info, custom_popularity, default_level, dist, distance_type, gap_lengths, names, par_map, resume, run_drawn, run_forking, seeds, set_card, sim_input};
+use super::{Dist, RivalSetup, GRADE_A, MAX_STAMINA, Race, Rivals, Run, STYLES, Work, ability_type, at_seed, course_info, custom_popularity, default_level, dist, distance_type, gap_lengths, names, par_map, resume, run_drawn, run_forking, seeds, set_card, sim_input};
 
 /// Default NPC field size (a Champions Meeting field): the measured uma and 8 NPCs.
 pub const FIELD_MIN: usize = 9;
@@ -40,11 +40,13 @@ pub struct NpcSetup {
     pub skills: Vec<i32>,
     /// Skill ids per `LOBBY_STYLES`, on top of `skills` (Runaways also get the Runaway skill).
     pub by_style: [Vec<i32>; 5],
+    /// With `rivals.on`, umas from saved replays fill the empty gates instead (`Rivals`).
+    pub rivals: RivalSetup,
 }
 
 impl Default for NpcSetup {
     fn default() -> Self {
-        NpcSetup { fill: true, counts: LOBBIES[2].1, stats: [1200, MAX_STAMINA, 1000, 600, 1000], skills: vec![], by_style: Default::default() }
+        NpcSetup { fill: true, counts: LOBBIES[2].1, stats: [1200, MAX_STAMINA, 1000, 600, 1000], skills: vec![], by_style: Default::default(), rivals: Default::default() }
     }
 }
 
@@ -141,11 +143,11 @@ pub struct SkillGain {
 }
 
 /// For each candidate: `horse` with the skill (added if not owned) vs the skill muted, paired on `n` seeds, in
-/// `input`'s field (see `npc_field`). `blank`: the horse's other skills removed in both runs (the skill alone vs no
+/// `input`'s field (see `npc_field`; `rivals` drawn per seed, `at_seed`). `blank`: the horse's other skills removed in both runs (the skill alone vs no
 /// skills). A candidate the horse doesn't own but owns another version of (same `group_id`) is measured in place of
 /// it: the gain is the new version's over the old one's. Sorted by mean gain, best first. Candidates without all `n` samples (cancelled)
 /// are dropped. Also each horse's full-spurt rate over all runs.
-pub fn skill_gains(race: &Race, input: &RaceInput, horse: usize, candidates: &[i32], blank: bool, n: usize, w: &Work) -> (Vec<SkillGain>, Vec<f32>) {
+pub fn skill_gains(race: &Race, input: &RaceInput, rivals: Option<&Rivals>, horse: usize, candidates: &[i32], blank: bool, n: usize, w: &Work) -> (Vec<SkillGain>, Vec<f32>) {
     let seeds = seeds(input.random_seed, n);
     let owned = &input.horses[horse].skills;
     let group = |id: i32| race.data.skills.get(&id).map_or(0, |s| s.group_id);
@@ -169,11 +171,11 @@ pub fn skill_gains(race: &Race, input: &RaceInput, horse: usize, candidates: &[i
     let res = par_map(first + single.len() * n, w, |j| {
         if j < first {
             w.done.fetch_add(shared.len() - 1, std::sync::atomic::Ordering::Relaxed);
-            return shared.iter().zip(owned_gains(race, input, horse, seeds[j], &ids)).map(|(&k, p)| (k * n + j, p)).collect();
+            return shared.iter().zip(owned_gains(race, input, rivals, horse, seeds[j], &ids)).map(|(&k, p)| (k * n + j, p)).collect();
         }
         let (k, s) = (single[(j - first) / n], (j - first) % n);
         let id = candidates[k];
-        let p = paired_gain(race, input, horse, seeds[s], id, replaces[k], |h| {
+        let p = paired_gain(race, input, rivals, horse, seeds[s], id, replaces[k], |h| {
             if blank {
                 h.skills.retain(|x| x.skill_id == id);
             }
@@ -242,9 +244,9 @@ fn tally(n: usize, res: Vec<(usize, Pair)>) -> (Vec<(usize, Gain)>, Vec<f32>) {
 /// The two runs are identical until `id` or `swap` first activates (only their effects differ), so the skill-on run
 /// resumes from the muted one's last snapshot before that (`run_forking`); no activation = no skill-on run (gain 0).
 /// Bit-identical to two full runs (`gains_fingerprint`).
-fn paired_gain(race: &Race, input: &RaceInput, i: usize, seed: i32, id: i32, swap: Option<i32>, setup: impl Fn(&mut HorseInput)) -> Pair {
+fn paired_gain(race: &Race, input: &RaceInput, rivals: Option<&Rivals>, i: usize, seed: i32, id: i32, swap: Option<i32>, setup: impl Fn(&mut HorseInput)) -> Pair {
     let run = |muted: bool| {
-        let mut inp = RaceInput { random_seed: seed, ..input.clone() };
+        let mut inp = at_seed(input, seed, rivals);
         let h = &mut inp.horses[i];
         setup(h);
         h.viewer_id = 1; // dense frames near the goal (recording only)
@@ -278,8 +280,8 @@ fn paired_gain(race: &Race, input: &RaceInput, i: usize, seed: i32, id: i32, swa
 /// `paired_gain` of each of `ids` on one seed, all skills horse `i` owns (no swap, no Runaway, no `setup`): the
 /// skill-on run of every one is `input` as is, so it runs once, and each muted run resumes from it before that skill
 /// first activated. Same pairs as `paired_gain`.
-fn owned_gains(race: &Race, input: &RaceInput, i: usize, seed: i32, ids: &[i32]) -> Vec<Pair> {
-    let mut on = RaceInput { random_seed: seed, ..input.clone() };
+fn owned_gains(race: &Race, input: &RaceInput, rivals: Option<&Rivals>, i: usize, seed: i32, ids: &[i32]) -> Vec<Pair> {
+    let mut on = at_seed(input, seed, rivals);
     on.horses[i].viewer_id = 1; // dense frames near the goal (recording only)
     let sim_on = sim_input(race, &on, true);
     let (a, forks) = run_forking(race, &sim_on, &ids.iter().map(|&id| vec![(i, id)]).collect::<Vec<_>>());
@@ -332,7 +334,7 @@ pub struct UmaRank {
 /// running that style with A aptitude for it, everything else hers (stats, other aptitudes, mood, skills; `set_card`
 /// swaps the unique, and the inherited version of the card's unique goes, as no uma has both), unique on vs muted on
 /// `n` seeds (`skill_gains`' measure). Sorted by mean gain, best first; cancelled items are dropped. Also each horse's full-spurt rate.
-pub fn uma_ranking(race: &Race, input: &RaceInput, horse: usize, cards: &[i32], styles: &[i32], n: usize, w: &Work) -> (Vec<UmaRank>, Vec<f32>) {
+pub fn uma_ranking(race: &Race, input: &RaceInput, rivals: Option<&Rivals>, horse: usize, cards: &[i32], styles: &[i32], n: usize, w: &Work) -> (Vec<UmaRank>, Vec<f32>) {
     let seeds = seeds(input.random_seed, n);
     // (card, style, unique)
     let items: Vec<(i32, i32, i32)> = cards
@@ -344,7 +346,7 @@ pub fn uma_ranking(race: &Race, input: &RaceInput, horse: usize, cards: &[i32], 
         .collect();
     let (v, spurt) = measure(items.len(), n, w, |k, s| {
         let (card, style, unique) = items[k];
-        paired_gain(race, input, horse, seeds[s], unique, None, |h| {
+        paired_gain(race, input, rivals, horse, seeds[s], unique, None, |h| {
             // set_card takes on another uma's aptitudes; she keeps her own.
             let apt = (h.proper_distance, h.proper_running_style, h.proper_ground);
             set_card(h, card);

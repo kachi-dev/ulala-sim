@@ -78,11 +78,11 @@ pub fn Picker() -> Element {
                     if n_picked > 0 { button { class: "btn ghost small", onclick: move |_| chosen.write().clear(), "Clear" } }
                     button {
                         class: "btn small",
-                        disabled: n_picked == 0 || running() || size.is_none(),
+                        disabled: n_picked == 0 || running() || size.is_err(),
                         onclick: move |_| optimize(s, chosen.cloned(), slot),
                         "Race ×{OPT_RUNS}"
                     }
-                    if size.is_none() { span { class: "warn", "{EMPTY_SLOTS}" } }
+                    if let Err(e) = &size { span { class: "warn", "{e}" } }
                     Progress {}
                 }
             }
@@ -282,24 +282,33 @@ fn toggle_pick(mut picks: Signal<Vec<Cand>>, c: Cand) {
 /// Slot optimizer: each of `cands` at field index `slot` (added after the umas when past them), the setup as it runs
 /// otherwise, on the same `OPT_RUNS` drawn seeds; `s.slot_res` gets their stats there by win rate, best first.
 /// Nothing on Cancel.
-fn optimize(s: S, cands: Vec<Cand>, slot: usize) {
+fn optimize(mut s: S, cands: Vec<Cand>, slot: usize) {
     let Some(race) = s.race.cloned() else { return };
     let setup = s.input.cloned();
-    let inputs: Vec<RaceInput> = cands
+    // Each in the setup's field as it runs: with rivals, every seed draws its own lobby (the same for every candidate).
+    let fields: Result<Vec<(RaceInput, Option<Rivals>)>, String> = cands
         .iter()
         .map(|c| {
             let mut h = c.horse.clone();
             h.skills.retain(|k| race.data.skills.contains_key(&k.skill_id));
             let mut inp = setup.clone();
-            if slot < inp.horses.len() { inp.horses[slot] = h } else { inp.horses.push(h) }
+            match inp.horses.get_mut(slot) {
+                // In the slot's team, as the uma she stands in for.
+                Some(x) => *x = HorseInput { team_id: x.team_id, ..h },
+                None => inp.horses.push(h),
+            }
             filled(s, &race, &inp)
         })
         .collect();
+    let inputs = match fields {
+        Ok(f) => f,
+        Err(e) => return s.err.set(Some(e)),
+    };
     let k = cands.len();
-    let work = k * OPT_RUNS * inputs[0].horses.len();
+    let work = k * OPT_RUNS * inputs[0].0.horses.len();
     let run = move |w: &Work| {
-        let seeds = seeds(inputs[0].random_seed, OPT_RUNS);
-        let st: Vec<HorseStats> = inputs.iter().map(|inp| run_batch(&race, inp, &seeds, true, w).horses.swap_remove(slot)).collect();
+        let seeds = seeds(inputs[0].0.random_seed, OPT_RUNS);
+        let st: Vec<HorseStats> = inputs.iter().map(|(inp, r)| run_batch(&race, inp, r.as_ref(), &seeds, true, w).horses.swap_remove(slot)).collect();
         (!w.cancel.load(Relaxed)).then_some(st)
     };
     measure(s, format!("Racing {k} umas × {OPT_RUNS} seeds"), k * OPT_RUNS, work, run, move |mut s, st| {
@@ -535,12 +544,13 @@ fn VeteranList(
     }
 }
 
-/// Puts uma `h` (as trained or saved) at gate `replace`, or adds her: skills the race's data lacks are dropped.
+/// Puts uma `h` (as trained or saved) at gate `replace`, in that gate's team, or adds her: skills the race's data lacks
+/// are dropped.
 fn place(mut s: S, mut h: HorseInput, trainer: String, replace: Option<usize>) {
     let Some(race) = s.race.cloned() else { return };
     h.skills.retain(|k| race.data.skills.contains_key(&k.skill_id));
     if let Some(i) = replace {
-        edit_race(s, |inp| inp.horses[i] = h);
+        edit_race(s, |inp| inp.horses[i] = HorseInput { team_id: inp.horses[i].team_id, ..h });
         if let Some(t) = s.trainers.write().get_mut(i) {
             *t = trainer;
         }
@@ -681,7 +691,7 @@ fn apt_img(g: i32) -> Element {
 
 /// A veteran or saved uma card's body: stats with their ranks, aptitudes (with SP), skills in the game's order
 /// (`need` ones marked).
-fn vc_body(h: &HorseInput, need: &[i32]) -> Element {
+pub(in crate::ui) fn vc_body(h: &HorseInput, need: &[i32]) -> Element {
     let apts = vet_apts(h);
     let sp = skills_sp(&h.skills);
     let sk: Vec<(SkillInfo, i32)> = game_order(&h.skills).into_iter().map(|(_, k)| (skill_info(k.skill_id), k.level)).collect();

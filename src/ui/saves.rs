@@ -118,8 +118,9 @@ pub(super) fn SaveSetupModal() -> Element {
     // Saving over another saved race (renaming to its own name isn't).
     let exists = path.as_ref().is_some_and(|p| p.exists() && renaming.as_ref() != Some(p));
     let (umas, size) = (input.horses.len(), *s.field_size.read());
-    let npcs = if s.npcs.read().fill { size.saturating_sub(umas) } else { 0 };
-    let field = if npcs > 0 { format!("{umas} umas + {npcs} NPCs") } else { format!("{umas} umas") };
+    let (fill, rivals) = { let n = s.npcs.read(); (n.fill, n.rivals.on) };
+    let npcs = if fill { size.saturating_sub(umas) } else { 0 };
+    let field = if npcs > 0 { format!("{umas} umas + {npcs} {}", if rivals { "rivals" } else { "NPCs" }) } else { format!("{umas} umas") };
     let base = if s.baseline.read().is_some() { " · baseline pinned" } else { "" };
     let (title, course) = (race_title(&race, &input), course_label(input.course_set_id));
     let at = if title == course || course.is_empty() { title } else { format!("{title}, {course}") };
@@ -415,7 +416,7 @@ pub(super) fn SavesModal() -> Element {
     let total = hits.len();
     let time = |t: &str| t.trim_end_matches('s').parse::<f32>().map(ft).unwrap_or_else(|_| t.to_string());
     let q = s.saves_q.cloned();
-    let npcs_of = |st: &SavedSetup| if st.npcs.fill { st.field_size.saturating_sub(st.input.horses.len()) } else { 0 };
+    let npcs_of = |st: &SavedSetup| if st.npcs.fill && !st.npcs.rivals.on { st.field_size.saturating_sub(st.input.horses.len()) } else { 0 };
     rsx! {
         div { class: "scrim", onclick: move |_| s.saves_open.set(false) }
         div { class: "modal races",
@@ -602,7 +603,7 @@ pub(super) fn SavesModal() -> Element {
                                                 div { class: "whobox",
                                                     if chara != 0 { {uma_icon(card, chara, None, "sm")} }
                                                     div {
-                                                        b { "{e.winner}" }
+                                                        b { if e.winner.is_empty() && chara != 0 { "{chara_name(chara)}" } else { "{e.winner}" } }
                                                         if card != 0 { div { class: "muted small", "{card_title(card)}" } }
                                                     }
                                                 }

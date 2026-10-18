@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 
 use uma_race_sim::api::RaceInput;
 
-use super::{Activation, HorseRun, OutcomeKind, Race, SkillOutcome, SpurtKind, run_drawn, run_once};
+use super::{Activation, HorseRun, OutcomeKind, Race, Rivals, SkillOutcome, SpurtKind, at_seed, run_drawn, run_once};
 
 /// `n` seeds: `s` first, then deterministic pseudo-random ones derived from it.
 pub fn seeds(s: i32, n: usize) -> Vec<i32> {
@@ -12,7 +12,7 @@ pub fn seeds(s: i32, n: usize) -> Vec<i32> {
 }
 
 /// splitmix64's next output.
-fn splitmix(x: &mut u64) -> u64 {
+pub(super) fn splitmix(x: &mut u64) -> u64 {
     *x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
     let mut z = *x;
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -166,11 +166,11 @@ fn outcomes(runs: &[&HorseRun], id: i32) -> [f32; 4] {
 
 /// Runs `input` once per seed on `worker_threads()`, counting finished runs in `w.done`. `draw`: gates drawn per seed
 /// (`run_drawn`); else in field order (the CM tab replays the server's draw). Once `w.cancel` is set it stops early
-/// and the result covers only the finished seeds (callers discard it).
-pub fn run_batch(race: &Race, input: &RaceInput, seeds: &[i32], draw: bool, w: &Work) -> Batch {
+/// and the result covers only the finished seeds (callers discard it). `rivals`: each seed draws its own (`at_seed`).
+pub fn run_batch(race: &Race, input: &RaceInput, rivals: Option<&Rivals>, seeds: &[i32], draw: bool, w: &Work) -> Batch {
     // Keep only the summaries: full frames for thousands of runs would be ~100 MB.
     let runs: Vec<_> = par_map(seeds.len(), w, |i| {
-        let inp = RaceInput { random_seed: seeds[i], ..input.clone() };
+        let inp = at_seed(input, seeds[i], rivals);
         let r = if draw { run_drawn(race, &inp) } else { run_once(race, &inp) };
         (r.horses, r.activations)
     })

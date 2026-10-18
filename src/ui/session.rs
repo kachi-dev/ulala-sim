@@ -148,6 +148,7 @@ pub(super) fn open(mut s: S, path: PathBuf) {
                     ed_mask: vec![false; n],
                     pairs: vec![None; n],
                     base_input: None,
+                    rivals: None,
                     cv,
                     rev,
                 }));

@@ -1,6 +1,6 @@
 use uma_race_sim::api::RaceInput;
 
-use super::{Activation, HorseRun, HorseStats, Race, Run, SpurtKind, Work, ability_type, distance_at, gap_lengths, par_map, resume, run_drawn, run_forking, sim_input, summarize, target_type};
+use super::{Activation, HorseRun, HorseStats, Race, Rivals, Run, SpurtKind, Work, ability_type, at_seed, distance_at, gap_lengths, par_map, resume, run_drawn, run_forking, sim_input, summarize, target_type};
 
 /// Raw stamina of "max stamina" (2000 after the sim halves the part over 1200, the game's cap).
 pub const MAX_STAMINA: i32 = 2800;
@@ -67,10 +67,12 @@ pub fn field_debuffs(race: &Race, input: &RaceInput, i: usize) -> Vec<(usize, i3
 /// snapshot before the debuff first activated (`run_forking`), and runs only on seeds it hit the horse (elsewhere it
 /// took none of her HP, and the difference would be knock-on noise: its effect on the others, then diverging RNG).
 /// `with_debuffs` false skips the debuffs.
-pub fn stamina(race: &Race, input: &RaceInput, i: usize, seeds: &[i32], with_debuffs: bool, w: &Work) -> Stamina {
-    let debuffs = if with_debuffs { field_debuffs(race, input, i) } else { vec![] };
+pub fn stamina(race: &Race, input: &RaceInput, rivals: Option<&Rivals>, i: usize, seeds: &[i32], with_debuffs: bool, w: &Work) -> Stamina {
+    // ponytail: with rivals only the umas' debuffs (the rivals change every seed); per-seed debuffs if it matters.
+    let mut debuffs = if with_debuffs { field_debuffs(race, input, i) } else { vec![] };
+    debuffs.retain(|d| rivals.is_none_or(|r| d.0 < r.from));
     let at = |seed: i32| {
-        let mut inp = RaceInput { random_seed: seed, ..input.clone() };
+        let mut inp = at_seed(input, seed, rivals);
         inp.horses[i].viewer_id = 1; // dense frames near the goal (recording only), for `gap_lengths`
         inp
     };

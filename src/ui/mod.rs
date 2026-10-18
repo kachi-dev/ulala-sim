@@ -6,6 +6,7 @@ mod gains;
 mod jobs;
 mod ranking;
 mod results;
+mod rivals;
 mod saves;
 mod session;
 mod setup;
@@ -95,6 +96,8 @@ struct Res {
     /// Per horse: the baseline run's horse it is (None: added since, or no baseline), and the baseline's field.
     pairs: Vec<Option<usize>>,
     base_input: Option<Arc<RaceInput>>,
+    /// The rivals drawn into the field per seed (`input` has the run's seed's draw).
+    rivals: Option<Rivals>,
     cv: Arc<CourseView>,
     rev: u64,
 }
@@ -118,9 +121,9 @@ struct GainsRes {
     asked: usize,
     /// Measured against no skills instead of her full skillset (Current Skills' "Blank" baseline).
     blank: bool,
-    /// NPCs and field size measured in (for "Improve fidelity", which re-measures one skill in the same field).
-    npcs: NpcSetup,
-    size: usize,
+    /// The field measured in, and its rivals (for "Improve fidelity", which re-measures one skill in the same field).
+    field: Arc<RaceInput>,
+    rivals: Option<Rivals>,
     /// Umas of the measured field with a low full-spurt rate (`low_spurts`).
     low_spurt: Vec<String>,
     rev: u64,
@@ -247,6 +250,10 @@ struct S {
     npcs: Signal<NpcSetup>,
     /// The NPC setup drawer.
     npc_open: Signal<bool>,
+    /// The Rival pool dialog (`npcs.rivals`).
+    rivals_open: Signal<bool>,
+    /// Results: the rival team (`Rivals::pool` index) open in the Rival teams table.
+    rival_open: Signal<Option<usize>>,
     /// The setup field's size: umas it takes, and what NPCs fill up to. `FIELD_MIN`, or an opened save's field size.
     field_size: Signal<usize>,
     /// Editor skill picker filters (kept between openings).
@@ -357,6 +364,8 @@ pub fn App() -> Element {
         g_blank: use_signal(|| false),
         npcs: use_signal(load_npcs),
         npc_open: use_signal(|| false),
+        rivals_open: use_signal(|| false),
+        rival_open: use_signal(|| None),
         field_size: use_signal(|| FIELD_MIN),
         pick_filter: use_signal(Default::default),
         r_styles: use_signal(|| vec![1, 2, 3, 4]),
@@ -403,6 +412,19 @@ pub fn App() -> Element {
         let setup = s.saved_race.read().as_ref().map(|st| st.path.clone());
         save_session(race.path.as_deref(), &s.input.read(), &s.trainers.read(), s.baseline.read().as_deref(), *s.field_size.read(), setup.as_deref());
     });
+    // The rival pool's replays parsed ahead of a run (the first one would otherwise wait for them).
+    use_effect(move || {
+        static WARMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        let on = { let n = s.npcs.read(); n.fill && n.rivals.on };
+        if !on || WARMING.swap(true, Relaxed) {
+            return;
+        }
+        let paths: Vec<PathBuf> = rival_teams(s).into_iter().map(|t| t.path).collect();
+        std::thread::spawn(move || {
+            let _ = warm_rivals(&paths);
+            WARMING.store(false, Relaxed);
+        });
+    });
     // NPCs and field size change the race (empty gates take NPCs): runs before it are stale.
     use_effect(move || {
         save_npcs(&s.npcs.read());
@@ -429,6 +451,7 @@ pub fn App() -> Element {
                 s.picker.set(false);
                 s.editing.set(None);
                 s.npc_open.set(false);
+                s.rivals_open.set(false);
                 s.g_sel.set(None);
                 s.r_sel.set(None);
                 s.left_open.set(false);
@@ -452,6 +475,7 @@ pub fn App() -> Element {
             }
             setup::Drawer {}
             setup::NpcDrawer {}
+            rivals::RivalsModal {}
             setup::Picker {}
             SavesModal {}
             SaveSetupModal {}
@@ -559,16 +583,26 @@ const SPLIT_JS: &str = r#"
   document.addEventListener('dblclick', e => { if (e.target.closest && e.target.closest('.hdivider')) { try { localStorage.removeItem(TKEY); } catch {} applyT(null); } });
   // When the course chart grows past its row (more state rows, a taller field), grow the row to show all of it, up
   // to 70% of the column; dragging still sets it until the chart grows again. Not saved.
-  const fitT = () => { const r = document.getElementById('right'), t = document.getElementById('topchart'); if (!r || !t) return;
+  // Minimized (or squeezed to a sliver), the window measures nothing real: the chart would set the row then and keep it.
+  const tiny = () => document.visibilityState === 'hidden' || innerWidth < 400 || innerHeight < 300;
+  const fitT = () => { const r = document.getElementById('right'), t = document.getElementById('topchart'); if (!r || !t || tiny()) return;
     const cs = getComputedStyle(t);
     const need = [...t.children].reduce((h, c) => h + c.getBoundingClientRect().height, 0) + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
     if (need > t.clientHeight + 1) r.style.setProperty('--top-h', Math.min(r.clientHeight * 0.7, need) + 'px'); };
-  const ro = new ResizeObserver(fitT);
+  // Measured once the layout settles: right after a resize the chart can be a frame stale (sized for the old width,
+  // several times taller) and would grow the row for good.
+  let fitTimer;
+  const fitSoon = () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitT, 250); };
+  const ro = new ResizeObserver(fitSoon);
+  // Back from minimized: the saved height again, then grown to the chart as usual.
+  let wasTiny = false;
+  const back = () => { const t = tiny(); if (wasTiny && !t) { applyT(savedT()); fitSoon(); } wasTiny = t; };
+  addEventListener('resize', back); document.addEventListener('visibilitychange', back);
   let watched = null;
   setInterval(() => { const t = document.getElementById('topchart'); if (!t) return;
     const kids = [...t.children];
     if (watched && watched.length === kids.length && kids.every((c, i) => c === watched[i])) return;
-    ro.disconnect(); kids.forEach(c => ro.observe(c)); watched = kids; fitT(); }, 500);
+    ro.disconnect(); kids.forEach(c => ro.observe(c)); watched = kids; fitSoon(); }, 500);
   // Subtab switch: hold the pane's scroll bottom so a shorter tab can't pull the page up; the hold
   // follows the view back up as you scroll and goes once the real content reaches it. Only your own
   // scrolling moves it (a wheel, key, touch or scrollbar drag in the last second): scroll events the
