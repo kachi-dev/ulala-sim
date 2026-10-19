@@ -10,17 +10,19 @@ This tool gives you complete control over lobby simulation, and implements all s
 
 ## Preview
 
+### Skill gains
+![Skill gains](docs/skill-gains.png)
+You'll notice that skill simulations often have negative length values, which is not a mistake. The skill simulation simulates the run with the skill, and then does a 2nd simulation from the point of activation but with the skill effects muted (i.e. +0m/s, +0m/s^2) and compares the difference between the two. 
+
+This can result in all sorts of weird and wonderful differences relating to position keep, or stamina, or the position of your uma, or even the knock-on positioning of other umas in the lobby (i.e. Professor of Curvature resulting in an overtake that ends up putting other umas in the lobby in a better position, or knocking you out of the activation requirements for your own accel skills.)
+
+All this is to say that I believe this simulation is as accurate as you'll ever get in evaluating the actual effectiveness of skills, but the 'actual effectiveness' of skills is dependent on the lobby, and even the strength of your own uma relative to other umas so how useful this tool is to you is also dependent on how much you're willing to experiment. If you just want a quick simulation to tell you what skills to buy you may end up doing more harm than good by taking this simulator's results at face value.
+
 ### Results
 ![Results of 1000 races](docs/results.png)
 
 ### Uma details
 ![Details for one uma](docs/details.png)
-
-### Skill gains
-![Skill gains](docs/skill-gains.png)
--L is due to knock-on effects of skills activating v not activating. On this track, this is usually due to that skill knocking Urara out of position for On Your Left! On one hand, it makes it more difficult to see raw length gains just from a singular skill, but on the other hand it does accurately portray the effect of this skill within that particular race/within this particular lobby setup.
-
-A sample count higher than 200 races, along with some sort of option to vary the lobby per-race, would likely(?) increase the accuracy of these results - but it is interesting data nonetheless.
 
 ### Uma ranking
 ![Uma ranking](docs/uma-ranking.png)
